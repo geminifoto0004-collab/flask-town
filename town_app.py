@@ -57,6 +57,7 @@ from blueprints.town_render_shared_dialogue_patch import patch_render_shared_dia
 from blueprints.town_render_admin_world_patch import patch_render_admin_world
 from blueprints.town_render_world_object_patch import patch_render_world_objects
 from blueprints.town_render_generic_entity_patch import patch_render_generic_entities
+from blueprints.town_render_dinosaur_patch import patch_render_dinosaurs
 from blueprints.town_render_admin_action_feedback_patch import patch_render_admin_action_feedback
 
 
@@ -104,19 +105,21 @@ town_ai_bp = _town_ai_module.town_ai_bp
 # main Render service.
 town_page_bp = _town_page_module.town_page_bp
 _town_page_module._patched_town_html = lambda: patch_render_admin_action_feedback(
-    patch_render_generic_entities(
-        patch_render_world_objects(
-            patch_render_admin_world(
-                patch_render_shared_dialogue(
-                    patch_render_panel_alignment(
-                        patch_render_dialogue_fix(
-                            patch_render_dialogue_panel(
-                                patch_render_profiles(
-                                    patch_render_chat_timing(
-                                        patch_render_fishing(
-                                            patch_render_depth(
-                                                patch_render_actions(
-                                                    patch_render_visibility(latest_town_html())
+    patch_render_dinosaurs(
+        patch_render_generic_entities(
+            patch_render_world_objects(
+                patch_render_admin_world(
+                    patch_render_shared_dialogue(
+                        patch_render_panel_alignment(
+                            patch_render_dialogue_fix(
+                                patch_render_dialogue_panel(
+                                    patch_render_profiles(
+                                        patch_render_chat_timing(
+                                            patch_render_fishing(
+                                                patch_render_depth(
+                                                    patch_render_actions(
+                                                        patch_render_visibility(latest_town_html())
+                                                    )
                                                 )
                                             )
                                         )
