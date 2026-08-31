@@ -73,6 +73,7 @@ from blueprints.town_render_generic_entity_patch import patch_render_generic_ent
 from blueprints.town_render_template_composer_patch import patch_render_template_composer
 from blueprints.town_render_dinosaur_patch import patch_render_dinosaurs
 from blueprints.town_render_admin_action_feedback_patch import patch_render_admin_action_feedback
+from blueprints.town_render_character_binding_patch import patch_render_character_bindings
 
 
 app = Flask(__name__)
@@ -138,26 +139,27 @@ install_character_admin_runtime()
 _town_ai_module._model_decision = grounded_model_decision
 town_ai_bp = _town_ai_module.town_ai_bp
 
-# Build the same known-good browser composition that previously lived on the
-# main Render service. The template composer extends the generic overlay rather
-# than adding story-specific drawing functions.
+# Build the browser composition and bind all historical sprite slots to the
+# current TiDB characters only after every visual patch has been injected.
 town_page_bp = _town_page_module.town_page_bp
-_town_page_module._patched_town_html = lambda: patch_render_admin_action_feedback(
-    patch_render_dinosaurs(
-        patch_render_template_composer(
-            patch_render_generic_entities(
-                patch_render_world_objects(
-                    patch_render_admin_world(
-                        patch_render_shared_dialogue(
-                            patch_render_panel_alignment(
-                                patch_render_dialogue_fix(
-                                    patch_render_dialogue_panel(
-                                        patch_render_profiles(
-                                            patch_render_chat_timing(
-                                                patch_render_fishing(
-                                                    patch_render_depth(
-                                                        patch_render_actions(
-                                                            patch_render_visibility(latest_town_html())
+_town_page_module._patched_town_html = lambda: patch_render_character_bindings(
+    patch_render_admin_action_feedback(
+        patch_render_dinosaurs(
+            patch_render_template_composer(
+                patch_render_generic_entities(
+                    patch_render_world_objects(
+                        patch_render_admin_world(
+                            patch_render_shared_dialogue(
+                                patch_render_panel_alignment(
+                                    patch_render_dialogue_fix(
+                                        patch_render_dialogue_panel(
+                                            patch_render_profiles(
+                                                patch_render_chat_timing(
+                                                    patch_render_fishing(
+                                                        patch_render_depth(
+                                                            patch_render_actions(
+                                                                patch_render_visibility(latest_town_html())
+                                                            )
                                                         )
                                                     )
                                                 )
