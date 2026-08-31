@@ -1,8 +1,9 @@
-"""Persist the shared CUSTOMS AGENT TOWN world in the configured database.
+"""Authoritative TiDB world storage for CUSTOMS AGENT TOWN.
 
-The existing town runtime stores plans/history in small JSON files. This module
-only redirects the authoritative world snapshot to the application database so
-all Render workers/viewers see the same state and profiles survive restarts.
+The shared world has exactly one source of truth: TiDB.  Local JSON remains
+available for unrelated runtime files, but the world snapshot never falls back
+to local disk.  This prevents split-brain state when Render temporarily loses
+its database connection.
 """
 
 import json
@@ -17,6 +18,7 @@ _ORIGINAL_READ_JSON = _base._read_json
 _ORIGINAL_WRITE_JSON = _base._write_json
 _SCHEMA_READY = False
 _SCHEMA_RETRY_AT = 0.0
+_LAST_ERROR = ""
 
 
 def _close(conn):
@@ -26,8 +28,13 @@ def _close(conn):
         pass
 
 
+def _set_error(exc):
+    global _LAST_ERROR
+    _LAST_ERROR = str(exc or "database unavailable")[:300]
+
+
 def _ensure_schema(force=False):
-    global _SCHEMA_READY, _SCHEMA_RETRY_AT
+    global _SCHEMA_READY, _SCHEMA_RETRY_AT, _LAST_ERROR
     now = time.time()
     if _SCHEMA_READY:
         return True
@@ -46,8 +53,10 @@ def _ensure_schema(force=False):
         """)
         conn.commit()
         _SCHEMA_READY = True
+        _LAST_ERROR = ""
         return True
-    except Exception:
+    except Exception as exc:
+        _set_error(exc)
         _SCHEMA_RETRY_AT = now + 30
         return False
     finally:
@@ -56,8 +65,11 @@ def _ensure_schema(force=False):
 
 
 def _db_read_world(default=None):
+    """Return (ok, data). ok=False means DB failure; empty row is still ok."""
+    global _LAST_ERROR
+    fallback = default if isinstance(default, dict) else {}
     if not _ensure_schema():
-        return default or {}
+        return False, dict(fallback)
     conn = None
     try:
         conn = get_db_connection()
@@ -65,18 +77,23 @@ def _db_read_world(default=None):
         execute_sql(cur, "SELECT payload_json FROM town_world_state WHERE state_key = ?", ("main",))
         row = cur.fetchone()
         if not row:
-            return default or {}
+            _LAST_ERROR = ""
+            return True, dict(fallback)
         raw = row.get("payload_json") if isinstance(row, dict) else row[0]
         data = json.loads(raw or "{}")
-        return data if isinstance(data, dict) else (default or {})
-    except Exception:
-        return default or {}
+        _LAST_ERROR = ""
+        return True, data if isinstance(data, dict) else dict(fallback)
+    except Exception as exc:
+        _set_error(exc)
+        return False, dict(fallback)
     finally:
         if conn is not None:
             _close(conn)
 
 
 def _db_write_world(data):
+    """Atomically upsert the current snapshot. Never write a local fallback."""
+    global _LAST_ERROR
     if not _ensure_schema():
         return False
     payload = json.dumps(data if isinstance(data, dict) else {}, ensure_ascii=False, separators=(",", ":"))
@@ -85,14 +102,18 @@ def _db_write_world(data):
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        execute_sql(cur, "SELECT state_key FROM town_world_state WHERE state_key = ?", ("main",))
-        if cur.fetchone():
-            execute_sql(cur, "UPDATE town_world_state SET payload_json = ?, updated_at_ms = ? WHERE state_key = ?", (payload, now_ms, "main"))
-        else:
-            execute_sql(cur, "INSERT INTO town_world_state (state_key, payload_json, updated_at_ms) VALUES (?, ?, ?)", ("main", payload, now_ms))
+        execute_sql(cur, """
+            INSERT INTO town_world_state (state_key, payload_json, updated_at_ms)
+            VALUES (?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+              payload_json = VALUES(payload_json),
+              updated_at_ms = VALUES(updated_at_ms)
+        """, ("main", payload, now_ms))
         conn.commit()
+        _LAST_ERROR = ""
         return True
-    except Exception:
+    except Exception as exc:
+        _set_error(exc)
         try:
             if conn is not None:
                 conn.rollback()
@@ -108,7 +129,7 @@ def _world_profiles(payload):
     world = payload.get("world") if isinstance(payload, dict) and isinstance(payload.get("world"), dict) else {}
     profiles = world.get("characterProfiles") if isinstance(world.get("characterProfiles"), list) else []
     result = []
-    for item in profiles[:3]:
+    for item in profiles:
         if not isinstance(item, dict):
             continue
         name = str(item.get("name") or "").upper()
@@ -123,13 +144,16 @@ def install_tidb_world_runtime():
 
     def read_json(path, default=None):
         if path == _base._WORLD_PATH:
-            data = _db_read_world(default)
-            if data:
-                return data
+            _ok, data = _db_read_world(default)
+            # Never consult local disk for the authoritative world. A DB outage
+            # yields the caller's controlled default instead of stale state.
+            return data
         return _ORIGINAL_READ_JSON(path, default)
 
     def write_json(path, data):
-        if path == _base._WORLD_PATH and _db_write_world(data):
+        if path == _base._WORLD_PATH:
+            if not _db_write_world(data):
+                raise RuntimeError("TiDB world write failed: " + (_LAST_ERROR or "database unavailable"))
             return
         return _ORIGINAL_WRITE_JSON(path, data)
 
@@ -138,13 +162,15 @@ def install_tidb_world_runtime():
 
     @_base.town_ai_bp.route("/storage-status", methods=["GET"])
     def town_storage_status():
-        stored = _db_read_world({})
+        ok, stored = _db_read_world({})
         profiles = _world_profiles(stored)
         saved_at = int(stored.get("saved_at") or 0) if isinstance(stored, dict) else 0
         return jsonify({
-            "ok": True,
-            "world_storage": "database" if bool(stored) else "database_empty_or_unavailable",
+            "ok": ok,
+            "world_storage": "database" if ok else "database_unavailable",
+            "world_initialized": bool(stored),
             "world_saved_at": saved_at,
             "profiles": profiles,
             "profile_count": len(profiles),
-        })
+            "error": "" if ok else _LAST_ERROR,
+        }), (200 if ok else 503)
