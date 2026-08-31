@@ -73,6 +73,7 @@ from blueprints.town_render_generic_entity_patch import patch_render_generic_ent
 from blueprints.town_render_template_composer_patch import patch_render_template_composer
 from blueprints.town_render_dinosaur_patch import patch_render_dinosaurs
 from blueprints.town_render_admin_action_feedback_patch import patch_render_admin_action_feedback
+from blueprints.town_render_core_character_patch import patch_render_core_characters
 
 
 app = Flask(__name__)
@@ -139,25 +140,28 @@ _town_ai_module._model_decision = grounded_model_decision
 town_ai_bp = _town_ai_module.town_ai_bp
 
 # Build the same known-good browser composition that previously lived on the
-# main Render service. Character presentation will be rebound client-side from
-# /api/town/world instead of blocking page generation on a TiDB query.
+# main Render service. Character presentation is read client-side from
+# /api/town/world; the final overlay replaces the historical officer sprites
+# without making page generation depend on a TiDB query.
 town_page_bp = _town_page_module.town_page_bp
-_town_page_module._patched_town_html = lambda: patch_render_admin_action_feedback(
-    patch_render_dinosaurs(
-        patch_render_template_composer(
-            patch_render_generic_entities(
-                patch_render_world_objects(
-                    patch_render_admin_world(
-                        patch_render_shared_dialogue(
-                            patch_render_panel_alignment(
-                                patch_render_dialogue_fix(
-                                    patch_render_dialogue_panel(
-                                        patch_render_profiles(
-                                            patch_render_chat_timing(
-                                                patch_render_fishing(
-                                                    patch_render_depth(
-                                                        patch_render_actions(
-                                                            patch_render_visibility(latest_town_html())
+_town_page_module._patched_town_html = lambda: patch_render_core_characters(
+    patch_render_admin_action_feedback(
+        patch_render_dinosaurs(
+            patch_render_template_composer(
+                patch_render_generic_entities(
+                    patch_render_world_objects(
+                        patch_render_admin_world(
+                            patch_render_shared_dialogue(
+                                patch_render_panel_alignment(
+                                    patch_render_dialogue_fix(
+                                        patch_render_dialogue_panel(
+                                            patch_render_profiles(
+                                                patch_render_chat_timing(
+                                                    patch_render_fishing(
+                                                        patch_render_depth(
+                                                            patch_render_actions(
+                                                                patch_render_visibility(latest_town_html())
+                                                            )
                                                         )
                                                     )
                                                 )
