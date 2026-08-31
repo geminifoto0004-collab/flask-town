@@ -6,6 +6,8 @@ ordinary life actions without calling DeepSeek. DeepSeek remains responsible
 for larger narrative/evolution events.
 """
 
+from .town_render_performance_patch import patch_render_performance
+
 
 def patch_render_local_life(html: str) -> str:
     marker = "  function sync(){"
@@ -46,4 +48,7 @@ def patch_render_local_life(html: str) -> str:
     html = html.replace("aiAutoTimer=rand(300,900);testDeepSeek();", "aiAutoTimer=rand(900,1800);testDeepSeek();")
     html = html.replace("aiAutoTimer=aiAuto?rand(15,35):999999;", "aiAutoTimer=aiAuto?rand(300,600):999999;")
     html = html.replace("if(aiAuto)aiAutoTimer=rand(8,22);", "if(aiAuto)aiAutoTimer=rand(300,600);")
-    return html
+
+    # Performance patch is intentionally last here: all earlier browser overlays
+    # already exist, so it can dedupe their world fetches and defer their startup.
+    return patch_render_performance(html)
