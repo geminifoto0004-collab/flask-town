@@ -73,7 +73,8 @@ from blueprints.town_render_generic_entity_patch import patch_render_generic_ent
 from blueprints.town_render_template_composer_patch import patch_render_template_composer
 from blueprints.town_render_dinosaur_patch import patch_render_dinosaurs
 from blueprints.town_render_admin_action_feedback_patch import patch_render_admin_action_feedback
-from blueprints.town_render_core_character_patch import patch_render_core_characters
+from blueprints.town_render_local_life_patch import patch_render_local_life
+from blueprints.town_render_character_binding_patch import patch_render_character_bindings
 
 
 app = Flask(__name__)
@@ -139,44 +140,42 @@ install_character_admin_runtime()
 _town_ai_module._model_decision = grounded_model_decision
 town_ai_bp = _town_ai_module.town_ai_bp
 
-# Build the same known-good browser composition that previously lived on the
-# main Render service. Character presentation is read client-side from
-# /api/town/world; the final overlay replaces the historical officer sprites
-# without making page generation depend on a TiDB query.
+
+def _build_cached_town_html():
+    """Compose the browser build once per Render worker, not once per request.
+
+    Keep the original mature pixel-character renderer/movement loop. Character
+    identity is rebound to the current TiDB core characters once during worker
+    startup, so there is no second overlay renderer and no delayed visual swap.
+    """
+    html = latest_town_html()
+    html = patch_render_visibility(html)
+    html = patch_render_actions(html)
+    html = patch_render_depth(html)
+    html = patch_render_fishing(html)
+    html = patch_render_chat_timing(html)
+    html = patch_render_profiles(html)
+    html = patch_render_dialogue_panel(html)
+    html = patch_render_dialogue_fix(html)
+    html = patch_render_panel_alignment(html)
+    html = patch_render_shared_dialogue(html)
+    html = patch_render_admin_world(html)
+    html = patch_render_world_objects(html)
+    html = patch_render_generic_entities(html)
+    html = patch_render_template_composer(html)
+    html = patch_render_dinosaurs(html)
+    html = patch_render_admin_action_feedback(html)
+    html = patch_render_local_life(html)
+    html = patch_render_character_bindings(html)
+    return html
+
+
+# Heavy gzip reconstruction and string patching happen once when this gunicorn
+# worker starts. Every /customs-town request afterwards returns the same cached
+# string immediately.
+_TOWN_HTML_CACHE = _build_cached_town_html()
 town_page_bp = _town_page_module.town_page_bp
-_town_page_module._patched_town_html = lambda: patch_render_core_characters(
-    patch_render_admin_action_feedback(
-        patch_render_dinosaurs(
-            patch_render_template_composer(
-                patch_render_generic_entities(
-                    patch_render_world_objects(
-                        patch_render_admin_world(
-                            patch_render_shared_dialogue(
-                                patch_render_panel_alignment(
-                                    patch_render_dialogue_fix(
-                                        patch_render_dialogue_panel(
-                                            patch_render_profiles(
-                                                patch_render_chat_timing(
-                                                    patch_render_fishing(
-                                                        patch_render_depth(
-                                                            patch_render_actions(
-                                                                patch_render_visibility(latest_town_html())
-                                                            )
-                                                        )
-                                                    )
-                                                )
-                                            )
-                                        )
-                                    )
-                                )
-                            )
-                        )
-                    )
-                )
-            )
-        )
-    )
-)
+_town_page_module._patched_town_html = lambda: _TOWN_HTML_CACHE
 
 app.register_blueprint(town_ai_bp)
 app.register_blueprint(town_page_bp)
@@ -198,6 +197,9 @@ def town_health():
             "admin_configured": bool((os.environ.get("TOWN_ADMIN_PASSWORD") or "").strip()),
             "core_characters": character_ids(),
             "entity_template_count": len(template_catalog()),
+            "town_html_cached": True,
+            "local_life_tick": True,
+            "native_character_renderer": True,
         }
     )
 
