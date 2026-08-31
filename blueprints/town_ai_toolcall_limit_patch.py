@@ -7,7 +7,9 @@ from . import town_ai_director_runtime as _director
 
 def _expanded_tool_calls_to_actions(message):
     actions = []
-    for call in (message.get("tool_calls") or [])[:12]:
+    # This is a technical safety ceiling, not a story limit.  Larger admin
+    # scenes may legitimately need many distinct visible actors/actions.
+    for call in (message.get("tool_calls") or [])[:32]:
         if not isinstance(call, dict):
             continue
         fn = call.get("function") or {}
