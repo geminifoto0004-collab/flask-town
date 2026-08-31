@@ -27,6 +27,7 @@ from blueprints.town_ai_sea_runtime import install_sea_runtime
 from blueprints.town_ai_shift_runtime import install_shift_runtime
 from blueprints.town_world_object_runtime import install_world_object_runtime
 from blueprints.town_generic_entity_runtime import install_generic_entity_runtime
+from blueprints.town_action_capacity_patch import install_action_capacity_patch
 from blueprints.town_relationship_runtime import install_relationship_runtime
 from blueprints.town_officer_scene_runtime import install_officer_scene_runtime
 from blueprints.town_generic_scene_runtime import install_generic_scene_runtime
@@ -38,6 +39,7 @@ from blueprints.town_dialogue_tidb_runtime import install_tidb_dialogue_runtime
 from blueprints import town_ai_toolcall_limit_patch as _town_ai_toolcall_limit_patch  # noqa: F401
 
 from blueprints.town_admin_runtime import install_town_admin_runtime
+from blueprints.town_admin_freedom_patch import install_admin_freedom_patch
 from blueprints.town_admin_scene_runtime import install_admin_scene_runtime
 from blueprints.town_officer_scene_admin_patch import install_officer_scene_admin_patch
 from blueprints.town_ai_grounded_director import grounded_model_decision
@@ -87,6 +89,7 @@ install_sea_runtime()
 install_shift_runtime()
 install_world_object_runtime()
 install_generic_entity_runtime()
+install_action_capacity_patch()
 install_relationship_runtime()
 install_officer_scene_runtime()
 install_generic_scene_runtime()
@@ -94,6 +97,7 @@ install_tidb_world_runtime()
 install_tidb_dialogue_runtime()
 install_admin_scene_runtime()
 install_officer_scene_admin_patch()
+install_admin_freedom_patch()
 install_town_admin_runtime()
 
 # /api/town/think uses the grounded director after all validation/persistence
