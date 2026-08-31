@@ -1,11 +1,12 @@
 """Authoritative TiDB world storage for CUSTOMS AGENT TOWN.
 
-The shared world has exactly one source of truth: TiDB.  Local JSON remains
+The shared world has exactly one source of truth: TiDB. Local JSON remains
 available for unrelated runtime files, but the world snapshot never falls back
-to local disk.  This prevents split-brain state when Render temporarily loses
-its database connection.
+to local disk. A very short in-process read cache coalesces duplicate browser
+polls without changing TiDB authority.
 """
 
+import copy
 import json
 import time
 
@@ -19,6 +20,8 @@ _ORIGINAL_WRITE_JSON = _base._write_json
 _SCHEMA_READY = False
 _SCHEMA_RETRY_AT = 0.0
 _LAST_ERROR = ""
+_READ_CACHE_SECONDS = 1.5
+_READ_CACHE = {"at": 0.0, "data": None}
 
 
 def _close(conn):
@@ -144,9 +147,14 @@ def install_tidb_world_runtime():
 
     def read_json(path, default=None):
         if path == _base._WORLD_PATH:
+            now = time.monotonic()
+            cached = _READ_CACHE.get("data")
+            if cached is not None and now - float(_READ_CACHE.get("at") or 0.0) < _READ_CACHE_SECONDS:
+                return copy.deepcopy(cached)
             _ok, data = _db_read_world(default)
-            # Never consult local disk for the authoritative world. A DB outage
-            # yields the caller's controlled default instead of stale state.
+            if isinstance(data, dict):
+                _READ_CACHE["data"] = copy.deepcopy(data)
+                _READ_CACHE["at"] = now
             return data
         return _ORIGINAL_READ_JSON(path, default)
 
@@ -154,6 +162,8 @@ def install_tidb_world_runtime():
         if path == _base._WORLD_PATH:
             if not _db_write_world(data):
                 raise RuntimeError("TiDB world write failed: " + (_LAST_ERROR or "database unavailable"))
+            _READ_CACHE["data"] = copy.deepcopy(data) if isinstance(data, dict) else {}
+            _READ_CACHE["at"] = time.monotonic()
             return
         return _ORIGINAL_WRITE_JSON(path, data)
 
