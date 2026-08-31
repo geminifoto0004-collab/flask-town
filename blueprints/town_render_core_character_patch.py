@@ -9,8 +9,6 @@ legacy movement slots until the old renderer is fully retired.
 
 
 def patch_render_core_characters(html: str) -> str:
-    # Expose the existing moving actor array from the embedded game loop.  Keep
-    # several safe anchors because the browser snapshot changes frequently.
     expose = "try{window.__townVisualAgents=agents;}catch(_townExposeErr){}"
     anchors = [
         "function drawAgent(a){",
@@ -42,7 +40,6 @@ def patch_render_core_characters(html: str) -> str:
   let canvas=document.getElementById('town-core-character-overlay');
   if(!canvas){canvas=document.createElement('canvas');canvas.id='town-core-character-overlay';canvas.width=640;canvas.height=400;wrap.appendChild(canvas);}
   const c=canvas.getContext('2d');if(!c)return;c.imageSmoothingEnabled=false;
-
   let core=[];let refreshing=false;
   const motion=new Map();
   const fallback=[{x:96,y:236},{x:320,y:236},{x:500,y:236}];
@@ -56,8 +53,6 @@ def patch_render_core_characters(html: str) -> str:
   function liveActor(index,a){
     const live=Array.isArray(window.__townVisualAgents)?window.__townVisualAgents:[];
     if(live[index]&&finite(live[index].x)&&finite(live[index].y))return live[index];
-    // Some future snapshots may already expose new character identity. Prefer a
-    // matching id/name when available, otherwise preserve stable slot order.
     const id=String(a&&((a.id||a.characterId||a.name||a.slot))||'').toUpperCase();
     const hit=live.find(v=>String(v&&((v.id||v.characterId||v.name||v.slot))||'').toUpperCase()===id);
     return hit&&finite(hit.x)&&finite(hit.y)?hit:null;
@@ -72,9 +67,7 @@ def patch_render_core_characters(html: str) -> str:
     const ty=live?Number(live.y):(finite(a&&a.y)?Number(a.y):fb.y);
     if(!m){m={x:tx,y:ty,lastX:tx,lastY:ty,lastAt:now,facing:'down',moving:false,step:0};motion.set(id,m);}
     const dx=tx-m.x,dy=ty-m.y,dist=Math.hypot(dx,dy);
-    // When attached to the mature actor loop, follow tightly. For world-only
-    // coordinates, interpolate so network refreshes still look like movement.
-    const gain=live?.x!==undefined?.42:.18;
+    const gain=(live&&live.x!==undefined)?0.42:0.18;
     m.x+=dx*Math.min(1,gain);m.y+=dy*Math.min(1,gain);
     const vx=m.x-m.lastX,vy=m.y-m.lastY;
     m.moving=Math.hypot(vx,vy)>.12 || dist>1.2;
@@ -89,7 +82,6 @@ def patch_render_core_characters(html: str) -> str:
     const text=String(a.displayName||a.name||a.characterId||a.slot||'').toUpperCase();if(!text)return;
     c.font='bold 7px monospace';
     const w=Math.max(38,Math.ceil(c.measureText(text).width)+10);
-    // Only cover the historical NAME PLATE, never the character/background.
     px(x-w/2-2,y-39,w+4,12,'rgba(18,27,34,.98)');
     c.fillStyle='#fff';c.textAlign='center';c.fillText(text,Math.round(x),Math.round(y-31));
   }
@@ -105,9 +97,6 @@ def patch_render_core_characters(html: str) -> str:
     const bob=m.moving?Math.round(Math.sin(m.step)*1.5):0;
     const stride=m.moving?(Math.sin(m.step)>0?2:-2):0;
 
-    // A compact but fully opaque sprite sits exactly on the live actor.  It is
-    // intentionally a little wider than the historical officer so the old body
-    // does not peek through; there is no rectangular background mask.
     px(x-9,y+12,18,3,'rgba(0,0,0,.22)');
     px(x-8-stride/2,y+4+bob,7,10,'#2f4050');
     px(x+1+stride/2,y+4-bob,7,10,'#2f4050');
@@ -121,7 +110,6 @@ def patch_render_core_characters(html: str) -> str:
       px(x-10,y-27+bob,20,6,hair);px(x-9,y-23+bob,18,3,hair);
     }
 
-    // Direction changes the face placement enough to read as an RPG actor.
     if(m.facing!=='up'){
       const eyeShift=m.facing==='left'?-2:(m.facing==='right'?2:0);
       px(x-5+eyeShift,y-16+bob,2,2,'#172126');px(x+3+eyeShift,y-16+bob,2,2,'#172126');
@@ -134,11 +122,7 @@ def patch_render_core_characters(html: str) -> str:
     label(a,x,y+bob);
   }
 
-  function frame(now){
-    c.clearRect(0,0,640,400);
-    core.forEach((a,i)=>drawCharacter(a,i,now));
-    requestAnimationFrame(frame);
-  }
+  function frame(now){c.clearRect(0,0,640,400);core.forEach((a,i)=>drawCharacter(a,i,now));requestAnimationFrame(frame);}
 
   async function refresh(){
     if(refreshing)return;refreshing=true;
