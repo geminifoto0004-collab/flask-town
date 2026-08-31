@@ -1,16 +1,15 @@
 """Render TiDB-owned core characters on the live game actor positions.
 
-The historical browser snapshot still owns movement/pathfinding, but it must no
-longer paint a second legacy officer underneath the TiDB character.  This patch
-therefore suppresses only the legacy officer draw function while leaving its
-update/state machine alive, exposes the moving actor array, and paints one
-TiDB-driven sprite at that live position.
+The historical browser snapshot keeps the mature movement/pathfinding loop.
+This patch takes over visual rendering only after both TiDB core character data
+and live movement actors are available. Until then the legacy renderer remains
+visible as a fail-safe, so a frontend/API mismatch can never make everyone
+vanish.
 """
 
 
 def patch_render_core_characters(html: str) -> str:
-    # Keep the mature movement engine alive, but expose its actor array from an
-    # UPDATE path (never from the draw path that we are about to suppress).
+    # Expose the existing movement actors without changing their state machine.
     expose = "try{window.__townVisualAgents=agents;}catch(_townExposeErr){}"
     for anchor in [
         "function updateAgent(a,dt){",
@@ -22,11 +21,9 @@ def patch_render_core_characters(html: str) -> str:
             html = html.replace(anchor, anchor + expose, 1)
             break
 
-    # Critical: REPLACE the old character drawing instead of covering it.  The
-    # old actor continues moving/updating, but its historical sprite/name plate
-    # is not painted at all.  This removes the ghost body visible under the new
-    # TiDB sprite without erasing desks/floor/background pixels.
-    suppress = "if(window.__townCoreRendererReady)return;"
+    # The old draw path is suppressed ONLY when the replacement renderer has
+    # positively confirmed that TiDB characters and live actor positions exist.
+    suppress = "if(window.__townCoreRendererReady===true)return;"
     for anchor in ["function drawAgent(a){", "function drawOfficer(a){"]:
         if anchor in html:
             html = html.replace(anchor, anchor + suppress, 1)
@@ -46,13 +43,12 @@ def patch_render_core_characters(html: str) -> str:
   let canvas=document.getElementById('town-core-character-overlay');
   if(!canvas){canvas=document.createElement('canvas');canvas.id='town-core-character-overlay';canvas.width=640;canvas.height=400;wrap.appendChild(canvas);}
   const c=canvas.getContext('2d');if(!c)return;c.imageSmoothingEnabled=false;
-  // Flip this only after the replacement canvas exists. The historical draw
-  // function checks it and stops drawing the old officer; movement keeps going.
-  window.__townCoreRendererReady=true;
 
+  // Fail-safe default: legacy characters stay visible until replacementReady()
+  // proves that this overlay can actually render moving actors.
+  window.__townCoreRendererReady=false;
   let core=[];let refreshing=false;
   const motion=new Map();
-  const fallback=[{x:96,y:236},{x:320,y:236},{x:500,y:236}];
 
   function px(x,y,w,h,color){c.fillStyle=color;c.fillRect(Math.round(x/2)*2,Math.round(y/2)*2,Math.max(2,Math.round(w/2)*2),Math.max(2,Math.round(h/2)*2));}
   function hash(s){let h=2166136261;for(const ch of String(s||'')){h^=ch.charCodeAt(0);h=Math.imul(h,16777619);}return h>>>0;}
@@ -60,30 +56,37 @@ def patch_render_core_characters(html: str) -> str:
   function profile(a){return (a&&a.profile&&typeof a.profile==='object')?a.profile:{};}
   function finite(v){return Number.isFinite(Number(v));}
 
+  function liveActors(){return Array.isArray(window.__townVisualAgents)?window.__townVisualAgents:[];}
+
   function liveActor(index,a){
-    const live=Array.isArray(window.__townVisualAgents)?window.__townVisualAgents:[];
+    const live=liveActors();
     if(live[index]&&finite(live[index].x)&&finite(live[index].y))return live[index];
     const id=String(a&&((a.id||a.characterId||a.name||a.slot))||'').toUpperCase();
     const hit=live.find(v=>String(v&&((v.id||v.characterId||v.name||v.slot))||'').toUpperCase()===id);
     return hit&&finite(hit.x)&&finite(hit.y)?hit:null;
   }
 
-  function pose(index,a,now){
+  function replacementReady(){
+    if(!Array.isArray(core)||!core.length)return false;
+    const live=liveActors();
+    if(!live.length)return false;
+    return core.every((a,i)=>!!liveActor(i,a));
+  }
+
+  function pose(index,a){
     const id=String(a&&((a.id||a.characterId||a.name||a.slot))||index);
-    let m=motion.get(id);
     const live=liveActor(index,a);
-    const fb=fallback[index%fallback.length];
-    const tx=live?Number(live.x):(finite(a&&a.x)?Number(a.x):fb.x);
-    const ty=live?Number(live.y):(finite(a&&a.y)?Number(a.y):fb.y);
+    if(!live)return null;
+    const tx=Number(live.x),ty=Number(live.y);
+    let m=motion.get(id);
     if(!m){m={x:tx,y:ty,lastX:tx,lastY:ty,facing:'down',moving:false,step:0};motion.set(id,m);}
     const dx=tx-m.x,dy=ty-m.y,dist=Math.hypot(dx,dy);
-    const gain=(live&&live.x!==undefined)?0.55:0.18;
-    m.x+=dx*Math.min(1,gain);m.y+=dy*Math.min(1,gain);
+    m.x+=dx*.65;m.y+=dy*.65;
     const vx=m.x-m.lastX,vy=m.y-m.lastY;
-    m.moving=Math.hypot(vx,vy)>.12 || dist>1.2;
+    m.moving=Math.hypot(vx,vy)>.10||dist>1;
     if(Math.abs(vx)>Math.abs(vy)&&Math.abs(vx)>.05)m.facing=vx>0?'right':'left';
     else if(Math.abs(vy)>.05)m.facing=vy>0?'down':'up';
-    if(m.moving)m.step+=.22;else m.step=0;
+    if(m.moving)m.step+=.24;else m.step=0;
     m.lastX=m.x;m.lastY=m.y;
     return m;
   }
@@ -95,9 +98,9 @@ def patch_render_core_characters(html: str) -> str:
     c.fillStyle='#fff';c.textAlign='center';c.fillText(text,Math.round(x),Math.round(y-31));
   }
 
-  function drawCharacter(a,index,now){
-    const m=pose(index,a,now),x=m.x,y=m.y;
-    const p=profile(a),id=String(a.name||a.characterId||a.slot||index);
+  function drawCharacter(a,index){
+    const m=pose(index,a);if(!m)return;
+    const x=m.x,y=m.y,p=profile(a),id=String(a.name||a.characterId||a.slot||index);
     const gender=String(p.gender||a.gender||'').toLowerCase();
     const birth=Number(p.birthYear||a.birthYear||0),age=birth?new Date().getFullYear()-birth:35;
     const colors=palette(id),body=colors[0],accent=colors[1];
@@ -123,11 +126,24 @@ def patch_render_core_characters(html: str) -> str:
     label(a,x,y+bob);
   }
 
-  function frame(now){c.clearRect(0,0,640,400);core.forEach((a,i)=>drawCharacter(a,i,now));requestAnimationFrame(frame);}
+  function frame(){
+    c.clearRect(0,0,640,400);
+    const ready=replacementReady();
+    window.__townCoreRendererReady=ready;
+    if(ready)core.forEach((a,i)=>drawCharacter(a,i));
+    requestAnimationFrame(frame);
+  }
+
   async function refresh(){
     if(refreshing)return;refreshing=true;
-    try{const r=await fetch('/api/town/world',{headers:{Accept:'application/json'},cache:'no-store'});if(!r.ok)return;const data=await r.json(),world=data&&data.world||{};core=Array.isArray(world.agents)?world.agents.filter(v=>v&&String(v.name||v.characterId||v.slot||'')):[];}catch(_e){}finally{refreshing=false;}
+    try{
+      const r=await fetch('/api/town/world',{headers:{Accept:'application/json'},cache:'no-store'});
+      if(!r.ok){core=[];window.__townCoreRendererReady=false;return;}
+      const data=await r.json(),world=data&&data.world||{};
+      core=Array.isArray(world.agents)?world.agents.filter(v=>v&&String(v.name||v.characterId||v.slot||'')):[];
+    }catch(_e){core=[];window.__townCoreRendererReady=false;}finally{refreshing=false;}
   }
+
   refresh();setInterval(refresh,650);requestAnimationFrame(frame);
 })();
 </script>
