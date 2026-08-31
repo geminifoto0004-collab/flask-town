@@ -33,6 +33,8 @@ from blueprints.town_generic_scene_runtime import install_generic_scene_runtime
 from blueprints.town_world_tidb_runtime import install_tidb_world_runtime
 from blueprints.town_dialogue_tidb_runtime import install_tidb_dialogue_runtime
 
+# Import side effect: allow longer composed tool-call sequences before admin and
+# language runtimes bind the action parser.
 from blueprints import town_ai_toolcall_limit_patch as _town_ai_toolcall_limit_patch  # noqa: F401
 
 from blueprints.town_admin_runtime import install_town_admin_runtime
@@ -70,6 +72,10 @@ app.config.update(
     SESSION_COOKIE_SECURE=bool(os.environ.get("RENDER") or os.environ.get("RENDER_SERVICE_NAME")),
 )
 
+
+# Keep the currently stable town runtime chain isolated from the main service.
+# Experimental universal-action modules stay in the repository but are not
+# enabled here until they have been tested independently.
 install_latest_action_runtime()
 install_visibility_runtime()
 install_history_runtime()
@@ -89,9 +95,13 @@ install_admin_scene_runtime()
 install_officer_scene_admin_patch()
 install_town_admin_runtime()
 
+# /api/town/think uses the grounded director after all validation/persistence
+# wrappers are installed.
 _town_ai_module._model_decision = grounded_model_decision
 town_ai_bp = _town_ai_module.town_ai_bp
 
+# Build the same known-good browser composition that previously lived on the
+# main Render service.
 town_page_bp = _town_page_module.town_page_bp
 _town_page_module._patched_town_html = lambda: patch_render_admin_action_feedback(
     patch_render_generic_entities(
