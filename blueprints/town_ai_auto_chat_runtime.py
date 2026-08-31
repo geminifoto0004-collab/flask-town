@@ -9,6 +9,7 @@ local and free; a local scripted chat is only a network/API fallback.
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import threading
@@ -28,10 +29,18 @@ _LAST_PAIR_CALL = {}
 
 
 def _chat_tool():
-    for tool in DIRECTOR_TOOLS:
-        fn = tool.get("function") if isinstance(tool, dict) else None
-        if isinstance(fn, dict) and fn.get("name") == "agent_chat":
-            return tool
+    """Return an isolated bilingual agent_chat schema for this endpoint."""
+    for original in DIRECTOR_TOOLS:
+        fn = original.get("function") if isinstance(original, dict) else None
+        if not isinstance(fn, dict) or fn.get("name") != "agent_chat":
+            continue
+        tool = copy.deepcopy(original)
+        try:
+            item_props = tool["function"]["parameters"]["properties"]["turns"]["items"]["properties"]
+            item_props["text_zh"] = {"type": "string", "minLength": 1, "maxLength": 160}
+        except Exception:
+            pass
+        return tool
     return None
 
 
@@ -86,7 +95,8 @@ def install_auto_chat_runtime():
         system = f"""You write one believable conversation inside CUSTOMS AGENT TOWN in Iquique, Chile.
 The participants are exactly {a} and {b}; do not substitute another permanent character.
 Use the supplied TiDB character profiles, recent dialogue and world state so the conversation feels continuous.
-Use natural everyday Chilean Spanish. Produce 4 to 8 turns and alternate naturally between the two speakers.
+Produce 4 to 8 turns and alternate naturally between the two speakers.
+For EVERY turn, text must be natural everyday Chilean Spanish and text_zh must be a natural Traditional Chinese translation of the same line.
 Current public information is supplied separately from the language model and is authoritative only to the extent shown.
 You MAY discuss a current headline, Iquique/Tarapaca, Chile, port/ZOFRI/customs work or the current weather when it fits naturally.
 A headline is only a headline fact: never invent article details, quotes, numbers, causes or outcomes that are not supplied.
@@ -114,7 +124,7 @@ Use ONLY the agent_chat tool. Do not narrate outside the tool call."""
             "tools": [tool],
             "tool_choice": "required",
             "temperature": 1.0,
-            "max_tokens": 1100,
+            "max_tokens": 1400,
         }
         try:
             response = requests.post(
@@ -127,8 +137,6 @@ Use ONLY the agent_chat tool. Do not narrate outside the tool call."""
                 raise RuntimeError(f"DeepSeek HTTP {response.status_code}: {response.text[:180]}")
             message = (((response.json().get("choices") or [{}])[0]).get("message") or {})
             raw = _tool_calls_to_actions(message)
-            # Keep only the requested pair and let the final server validator
-            # normalize/validate all dialogue turn fields.
             candidate = []
             for action in raw:
                 if str(action.get("type") or "") != "agent_chat":
