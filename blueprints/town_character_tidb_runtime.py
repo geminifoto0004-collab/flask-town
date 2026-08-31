@@ -121,20 +121,18 @@ def character_context(force=False):
     return load_core_characters(force=force)
 
 
-def _replace_enum(schema, ids):
+def _replace_enum(schema, old_ids, new_ids):
     if isinstance(schema, dict):
         enum = schema.get("enum")
         if isinstance(enum, list) and enum:
-            upper = {str(v).upper() for v in enum}
-            # Only replace enums that are clearly officer-ID enums.  Semantic
-            # enums such as action names, zones or relationship states remain.
-            if any(v in upper for v in {"MIA", "ANA", "LIA"}):
-                schema["enum"] = list(ids)
+            normalized = {str(v).upper() for v in enum}
+            if old_ids and normalized == old_ids:
+                schema["enum"] = list(new_ids)
         for value in schema.values():
-            _replace_enum(value, ids)
+            _replace_enum(value, old_ids, new_ids)
     elif isinstance(schema, list):
         for value in schema:
-            _replace_enum(value, ids)
+            _replace_enum(value, old_ids, new_ids)
 
 
 def refresh_runtime_character_bindings(force=False):
@@ -148,6 +146,10 @@ def refresh_runtime_character_bindings(force=False):
     from . import town_ai_shift_runtime as shift_runtime
     from . import town_officer_scene_runtime as officer_scene_runtime
 
+    previous_ids = {str(v).upper() for v in director._AGENT_ENUM}
+    for tool in director.DIRECTOR_TOOLS:
+        _replace_enum(tool, previous_ids, ids)
+
     director._AGENT_ENUM[:] = ids
     if hasattr(_base, "_ALLOWED_AGENTS"):
         _base._ALLOWED_AGENTS.clear()
@@ -160,7 +162,8 @@ def refresh_runtime_character_bindings(force=False):
     ):
         value = getattr(module, attr, None)
         if isinstance(value, set):
-            value.clear(); value.update(ids)
+            value.clear()
+            value.update(ids)
         else:
             setattr(module, attr, set(ids))
 
@@ -169,9 +172,6 @@ def refresh_runtime_character_bindings(force=False):
         officers[:] = ids
     else:
         officer_scene_runtime._OFFICERS = list(ids)
-
-    for tool in director.DIRECTOR_TOOLS:
-        _replace_enum(tool, ids)
     return ids
 
 
