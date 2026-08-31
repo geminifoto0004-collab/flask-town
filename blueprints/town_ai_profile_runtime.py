@@ -1,8 +1,7 @@
-"""Persistent character life-profile support for CUSTOMS AGENT TOWN.
+"""Persistent dynamic character life-profile support for CUSTOMS AGENT TOWN.
 
-Adds a safe agent_profile director tool and keeps the profile/dialogue context
-available after the base world cleaner runs. Profiles are context for AI choices,
-not hard-coded personality rules.
+Profiles follow the current runtime character IDs.  There is no fixed officer
+count; TiDB decides how many active core characters exist.
 """
 
 from . import town_ai_bp as _base
@@ -19,31 +18,37 @@ def _ensure_tool():
         return
     DIRECTOR_TOOLS.insert(4, _fn(
         "agent_profile",
-        "Create or update persistent life context for one officer. Use this for age, gender, zodiac, marital status, children and personal likes/interests. These facts influence plausible conversation topics but never force stereotypes.",
+        "Create or update persistent life context for one current core character. Facts provide context for AI choices but never force stereotypes.",
         {
             "agent": {"type": "string", "enum": _AGENT_ENUM},
-            "age": {"type": "integer", "minimum": 18, "maximum": 75},
-            "gender": {"type": "string", "maxLength": 18},
+            "age": {"type": "integer", "minimum": 18, "maximum": 100},
+            "gender": {"type": "string", "maxLength": 24},
             "zodiac": {"type": "string", "enum": _ZODIAC},
             "maritalStatus": {"type": "string", "enum": ["single", "partnered", "married", "divorced", "widowed"]},
             "hasChildren": {"type": "boolean"},
-            "childrenCount": {"type": "integer", "minimum": 0, "maximum": 8},
-            "likes": {"type": "array", "maxItems": 10, "items": {"type": "string", "maxLength": 28}},
-            "dislikes": {"type": "array", "maxItems": 10, "items": {"type": "string", "maxLength": 28}},
-            "interests": {"type": "array", "maxItems": 10, "items": {"type": "string", "maxLength": 28}},
+            "childrenCount": {"type": "integer", "minimum": 0, "maximum": 20},
+            "likes": {"type": "array", "maxItems": 20, "items": {"type": "string", "maxLength": 40}},
+            "dislikes": {"type": "array", "maxItems": 20, "items": {"type": "string", "maxLength": 40}},
+            "interests": {"type": "array", "maxItems": 20, "items": {"type": "string", "maxLength": 40}},
         },
-        ["agent", "age", "gender", "zodiac", "maritalStatus", "hasChildren", "childrenCount", "likes", "dislikes", "interests"],
+        ["agent"],
     ))
+
+
+def _current_ids():
+    return {str(v or "").upper() for v in _AGENT_ENUM if str(v or "").strip()}
 
 
 def _clean_text_list(value):
     if not isinstance(value, list):
         return []
     out = []
-    for item in value[:10]:
-        text = str(item or "").strip()[:28]
-        if text:
+    for item in value:
+        text = str(item or "").strip()[:40]
+        if text and text not in out:
             out.append(text)
+        if len(out) >= 20:
+            break
     return out
 
 
@@ -53,17 +58,17 @@ def _clean_profile(profile):
     cleaned = {}
     try:
         if profile.get("age") is not None:
-            cleaned["age"] = max(18, min(75, int(profile.get("age"))))
+            cleaned["age"] = max(18, min(100, int(profile.get("age"))))
     except Exception:
         pass
-    for key, limit in (("gender", 18), ("zodiac", 18), ("maritalStatus", 24)):
+    for key, limit in (("gender", 24), ("zodiac", 18), ("maritalStatus", 24)):
         if profile.get(key) is not None:
             cleaned[key] = str(profile.get(key) or "")[:limit]
     if profile.get("hasChildren") is not None:
         cleaned["hasChildren"] = bool(profile.get("hasChildren"))
     try:
         if profile.get("childrenCount") is not None:
-            cleaned["childrenCount"] = max(0, min(8, int(profile.get("childrenCount"))))
+            cleaned["childrenCount"] = max(0, min(20, int(profile.get("childrenCount"))))
     except Exception:
         pass
     for key in ("likes", "dislikes", "interests"):
@@ -82,17 +87,18 @@ def install_profile_runtime():
         if not isinstance(world, dict):
             return cleaned
 
+        valid_ids = _current_ids()
         source_agents = [a for a in world.get("agents", []) if isinstance(a, dict)] if isinstance(world.get("agents"), list) else []
         cleaned_agents = [dict(a) for a in cleaned.get("agents", []) if isinstance(a, dict)]
         for clean_agent in cleaned_agents:
-            name = str(clean_agent.get("name") or "").upper()
-            source = next((a for a in source_agents if str(a.get("name") or "").upper() == name), None)
+            name = str(clean_agent.get("name") or clean_agent.get("slot") or "").upper()
+            source = next((a for a in source_agents if str(a.get("name") or a.get("slot") or "").upper() == name), None)
             if source:
                 profile = _clean_profile(source.get("profile"))
                 if profile:
                     clean_agent["profile"] = profile
         if cleaned_agents:
-            cleaned["agents"] = cleaned_agents[:3]
+            cleaned["agents"] = cleaned_agents
 
         profiles = []
         supplied_profiles = world.get("characterProfiles") if isinstance(world.get("characterProfiles"), list) else []
@@ -100,52 +106,51 @@ def install_profile_runtime():
             if not isinstance(item, dict):
                 continue
             name = str(item.get("name") or "").upper()
-            if name not in _AGENT_ENUM:
+            if name not in valid_ids:
                 continue
             profiles.append({"name": name, "profile": _clean_profile(item.get("profile"))})
 
-        # If the browser has not supplied a separate profile list yet, derive it
-        # from persistent agent rows so a reload does not erase life context.
         if not profiles:
             for agent in cleaned.get("agents", []):
                 if not isinstance(agent, dict):
                     continue
-                name = str(agent.get("name") or "").upper()
-                if name in _AGENT_ENUM:
+                name = str(agent.get("name") or agent.get("slot") or "").upper()
+                if name in valid_ids:
                     profiles.append({"name": name, "profile": _clean_profile(agent.get("profile"))})
         if profiles:
-            cleaned["characterProfiles"] = profiles[:3]
+            cleaned["characterProfiles"] = profiles
 
         recent_dialogue = []
         for item in world.get("recentDialogue") if isinstance(world.get("recentDialogue"), list) else []:
             if not isinstance(item, dict):
                 continue
-            members = [str(v or "").upper() for v in (item.get("members") or []) if str(v or "").upper() in _AGENT_ENUM][:2]
+            members = [str(v or "").upper() for v in (item.get("members") or []) if str(v or "").upper() in valid_ids]
             text = str(item.get("text") or "")[:520]
             recent_dialogue.append({"at": item.get("at"), "members": members, "text": text})
         if recent_dialogue:
-            cleaned["recentDialogue"] = recent_dialogue[-8:]
+            cleaned["recentDialogue"] = recent_dialogue[-24:]
 
         if world.get("profileGuidance"):
-            cleaned["profileGuidance"] = str(world.get("profileGuidance"))[:700]
+            cleaned["profileGuidance"] = str(world.get("profileGuidance"))[:1200]
         return cleaned
 
     def validate_actions(raw_actions):
         if not isinstance(raw_actions, list):
             return []
+        valid_ids = _current_ids()
         output = []
-        for item in raw_actions[:12]:
+        for item in raw_actions:
             if not isinstance(item, dict) or str(item.get("type") or "") != "agent_profile":
                 output.extend(previous_validate([item]))
-                continue
-            agent = str(item.get("agent") or "").upper()
-            if agent not in _AGENT_ENUM:
-                continue
-            profile = _clean_profile(item)
-            if not profile:
-                continue
-            output.append({"type": "agent_profile", "agent": agent, **profile})
-        return output[:10]
+            else:
+                agent = str(item.get("agent") or "").upper()
+                if agent in valid_ids:
+                    profile = _clean_profile(item)
+                    if profile:
+                        output.append({"type": "agent_profile", "agent": agent, **profile})
+            if len(output) >= 64:
+                break
+        return output[:64]
 
     def apply_persistent_actions(world, actions):
         actions = actions or []
@@ -154,16 +159,17 @@ def install_profile_runtime():
         agents = [dict(a) for a in evolved.get("agents", []) if isinstance(a, dict)]
         for action in profile_actions:
             for agent in agents:
-                if str(agent.get("name") or "").upper() == action.get("agent"):
+                if str(agent.get("name") or agent.get("slot") or "").upper() == action.get("agent"):
                     current = _clean_profile(agent.get("profile"))
                     current.update(_clean_profile(action))
                     agent["profile"] = current
                     break
-        evolved["agents"] = agents[:3]
+        valid_ids = _current_ids()
+        evolved["agents"] = agents
         evolved["characterProfiles"] = [
-            {"name": str(agent.get("name") or "").upper(), "profile": _clean_profile(agent.get("profile"))}
-            for agent in agents[:3]
-            if str(agent.get("name") or "").upper() in _AGENT_ENUM
+            {"name": str(agent.get("name") or agent.get("slot") or "").upper(), "profile": _clean_profile(agent.get("profile"))}
+            for agent in agents
+            if str(agent.get("name") or agent.get("slot") or "").upper() in valid_ids
         ]
         return evolved
 
