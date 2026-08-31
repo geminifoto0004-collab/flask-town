@@ -33,6 +33,12 @@ from blueprints.town_officer_scene_runtime import install_officer_scene_runtime
 from blueprints.town_generic_scene_runtime import install_generic_scene_runtime
 from blueprints.town_world_tidb_runtime import install_tidb_world_runtime
 from blueprints.town_dialogue_tidb_runtime import install_tidb_dialogue_runtime
+from blueprints.town_character_tidb_runtime import (
+    character_ids,
+    install_character_runtime,
+    run_sql_migration_file,
+)
+from blueprints.town_character_validation_patch import install_character_validation_patch
 
 # Import side effect: allow longer composed tool-call sequences before admin and
 # language runtimes bind the action parser.
@@ -43,6 +49,7 @@ from blueprints.town_admin_freedom_patch import install_admin_freedom_patch
 from blueprints.town_admin_scene_runtime import install_admin_scene_runtime
 from blueprints.town_officer_scene_admin_patch import install_officer_scene_admin_patch
 from blueprints.town_ai_grounded_director import grounded_model_decision
+from blueprints.town_character_director_patch import install_character_director_patch
 
 from blueprints import town_page_bp as _town_page_module
 from blueprints.town_latest_page_runtime import latest_town_html
@@ -77,8 +84,6 @@ app.config.update(
 
 
 # Keep the currently stable town runtime chain isolated from the main service.
-# Experimental universal-action modules stay in the repository but are not
-# enabled here until they have been tested independently.
 install_latest_action_runtime()
 install_visibility_runtime()
 install_history_runtime()
@@ -97,9 +102,23 @@ install_action_capacity_patch()
 install_generic_scene_runtime()
 install_tidb_world_runtime()
 install_tidb_dialogue_runtime()
+
+# Character identity/personality is owned by TiDB.  The SQL file is only a
+# one-time data migration for a brand-new empty table; once rows exist it is not
+# replayed, so later TiDB edits remain authoritative.
+if not character_ids(force=True):
+    run_sql_migration_file(
+        os.path.join(os.path.dirname(__file__), "migrations", "20260831_town_characters.sql")
+    )
+install_character_runtime()
+
 install_admin_scene_runtime()
 install_officer_scene_admin_patch()
 install_admin_freedom_patch()
+# Final dialogue validation reads the current TiDB officer IDs instead of any
+# legacy source-code name list.
+install_character_validation_patch()
+install_character_director_patch()
 install_town_admin_runtime()
 
 # /api/town/think uses the grounded director after all validation/persistence
@@ -158,6 +177,7 @@ def town_health():
             "town_page": "/customs-town",
             "deepseek_configured": bool((os.environ.get("DEEPSEEK_API_KEY") or "").strip()),
             "admin_configured": bool((os.environ.get("TOWN_ADMIN_PASSWORD") or "").strip()),
+            "core_characters": character_ids(),
         }
     )
 
