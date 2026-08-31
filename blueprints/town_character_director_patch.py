@@ -13,6 +13,7 @@ from . import town_admin_runtime as _admin
 from . import town_ai_grounded_director as _grounded
 from . import town_ai_language_runtime as _language
 from .town_ai_director_runtime import DIRECTOR_TOOLS, _tool_calls_to_actions
+from .town_ai_auto_chat_runtime import install_auto_chat_runtime
 from .town_character_tidb_runtime import character_context, character_id_set, character_ids, refresh_runtime_character_bindings
 from .town_current_context_runtime import (
     current_context,
@@ -220,9 +221,11 @@ def _dynamic_on_duty_agents(world, context):
 
 
 def install_character_director_patch():
-    # This installs the TiDB-backed current-information API and starts a daemon
-    # refresh after startup. It does not block the town page from rendering.
+    # These runtimes do not block page rendering: current public information is
+    # refreshed in a daemon, while whole conversations are generated only when
+    # the browser occasionally asks two active characters to chat.
     install_current_context_runtime(_base.town_ai_bp)
+    install_auto_chat_runtime()
     refresh_runtime_character_bindings(force=True)
     _language._call_model = dynamic_call_model
     _grounded._call_model = dynamic_call_model
