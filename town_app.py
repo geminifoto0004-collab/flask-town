@@ -89,9 +89,11 @@ install_sea_runtime()
 install_shift_runtime()
 install_world_object_runtime()
 install_generic_entity_runtime()
-install_action_capacity_patch()
 install_relationship_runtime()
 install_officer_scene_runtime()
+# Put the capacity adapter after the older validators so their small per-call
+# caps cannot silently erase later actors in a larger admin scene.
+install_action_capacity_patch()
 install_generic_scene_runtime()
 install_tidb_world_runtime()
 install_tidb_dialogue_runtime()
