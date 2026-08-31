@@ -27,6 +27,8 @@ from blueprints.town_ai_sea_runtime import install_sea_runtime
 from blueprints.town_ai_shift_runtime import install_shift_runtime
 from blueprints.town_world_object_runtime import install_world_object_runtime
 from blueprints.town_generic_entity_runtime import install_generic_entity_runtime
+from blueprints.town_entity_template_runtime import install_entity_template_runtime, template_catalog
+from blueprints.town_entity_interaction_runtime import install_entity_interaction_runtime
 from blueprints.town_action_capacity_patch import install_action_capacity_patch
 from blueprints.town_relationship_runtime import install_relationship_runtime
 from blueprints.town_officer_scene_runtime import install_officer_scene_runtime
@@ -50,6 +52,7 @@ from blueprints.town_admin_scene_runtime import install_admin_scene_runtime
 from blueprints.town_officer_scene_admin_patch import install_officer_scene_admin_patch
 from blueprints.town_ai_grounded_director import grounded_model_decision
 from blueprints.town_character_director_patch import install_character_director_patch
+from blueprints.town_entity_template_director_patch import install_entity_template_director_patch
 from blueprints.town_character_admin_runtime import install_character_admin_runtime
 
 from blueprints import town_page_bp as _town_page_module
@@ -67,6 +70,7 @@ from blueprints.town_render_shared_dialogue_patch import patch_render_shared_dia
 from blueprints.town_render_admin_world_patch import patch_render_admin_world
 from blueprints.town_render_world_object_patch import patch_render_world_objects
 from blueprints.town_render_generic_entity_patch import patch_render_generic_entities
+from blueprints.town_render_template_composer_patch import patch_render_template_composer
 from blueprints.town_render_dinosaur_patch import patch_render_dinosaurs
 from blueprints.town_render_admin_action_feedback_patch import patch_render_admin_action_feedback
 
@@ -95,6 +99,12 @@ install_sea_runtime()
 install_shift_runtime()
 install_world_object_runtime()
 install_generic_entity_runtime()
+
+# Generic creation layer: AI can define reusable visual/behavior data in TiDB,
+# spawn instances from it, then use semantic interactions on those instances.
+install_entity_template_runtime()
+install_entity_interaction_runtime()
+
 install_relationship_runtime()
 install_officer_scene_runtime()
 # Put the capacity adapter after the older validators so their small per-call
@@ -104,9 +114,8 @@ install_generic_scene_runtime()
 install_tidb_world_runtime()
 install_tidb_dialogue_runtime()
 
-# Character identity/personality is owned by TiDB.  The SQL file is only a
-# one-time data migration for a brand-new empty table; once rows exist it is not
-# replayed, so later TiDB edits remain authoritative.
+# Character identity/personality is owned by TiDB. The SQL file seeds a brand-
+# new installation; subsequent character data is edited in TiDB/admin API.
 if not character_ids(force=True):
     run_sql_migration_file(
         os.path.join(os.path.dirname(__file__), "migrations", "20260831_town_characters.sql")
@@ -120,6 +129,7 @@ install_admin_freedom_patch()
 # legacy source-code name list.
 install_character_validation_patch()
 install_character_director_patch()
+install_entity_template_director_patch()
 install_town_admin_runtime()
 install_character_admin_runtime()
 
@@ -129,23 +139,26 @@ _town_ai_module._model_decision = grounded_model_decision
 town_ai_bp = _town_ai_module.town_ai_bp
 
 # Build the same known-good browser composition that previously lived on the
-# main Render service.
+# main Render service. The template composer extends the generic overlay rather
+# than adding story-specific drawing functions.
 town_page_bp = _town_page_module.town_page_bp
 _town_page_module._patched_town_html = lambda: patch_render_admin_action_feedback(
     patch_render_dinosaurs(
-        patch_render_generic_entities(
-            patch_render_world_objects(
-                patch_render_admin_world(
-                    patch_render_shared_dialogue(
-                        patch_render_panel_alignment(
-                            patch_render_dialogue_fix(
-                                patch_render_dialogue_panel(
-                                    patch_render_profiles(
-                                        patch_render_chat_timing(
-                                            patch_render_fishing(
-                                                patch_render_depth(
-                                                    patch_render_actions(
-                                                        patch_render_visibility(latest_town_html())
+        patch_render_template_composer(
+            patch_render_generic_entities(
+                patch_render_world_objects(
+                    patch_render_admin_world(
+                        patch_render_shared_dialogue(
+                            patch_render_panel_alignment(
+                                patch_render_dialogue_fix(
+                                    patch_render_dialogue_panel(
+                                        patch_render_profiles(
+                                            patch_render_chat_timing(
+                                                patch_render_fishing(
+                                                    patch_render_depth(
+                                                        patch_render_actions(
+                                                            patch_render_visibility(latest_town_html())
+                                                        )
                                                     )
                                                 )
                                             )
@@ -180,6 +193,7 @@ def town_health():
             "deepseek_configured": bool((os.environ.get("DEEPSEEK_API_KEY") or "").strip()),
             "admin_configured": bool((os.environ.get("TOWN_ADMIN_PASSWORD") or "").strip()),
             "core_characters": character_ids(),
+            "entity_template_count": len(template_catalog()),
         }
     )
 
