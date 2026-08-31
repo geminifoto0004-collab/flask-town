@@ -62,7 +62,7 @@ def _ensure_scene_tool():
                 "description": "Concise Traditional Chinese note explaining the believable adaptation/optimization you chose."
             },
             "steps": {
-                "type": "array", "minItems": 2, "maxItems": 14,
+                "type": "array", "minItems": 2, "maxItems": 24,
                 "items": {
                     "type": "object",
                     "properties": {
@@ -98,7 +98,9 @@ def install_generic_scene_runtime():
         if not isinstance(raw_actions, list):
             return []
         expanded = []
-        for raw in raw_actions[:18]:
+        # Technical ceiling only: do not silently drop later actors from a
+        # legitimate multi-entity admin scene.
+        for raw in raw_actions[:32]:
             if not isinstance(raw, dict) or str(raw.get("type") or "") != "entity_scene":
                 expanded.append(raw)
                 continue
@@ -155,10 +157,10 @@ def install_generic_scene_runtime():
                     expanded.append({"type": "wait", "entity": entity_id, "seconds": step.get("seconds")})
                 elif kind == "leave":
                     expanded.append({"type": "leave", "entity": entity_id})
-                if len(expanded) >= 16:
+                if len(expanded) >= 64:
                     break
-            if len(expanded) >= 16:
+            if len(expanded) >= 64:
                 break
-        return previous_validate(expanded[:16])
+        return previous_validate(expanded[:64])
 
     _base._validate_actions = validate_actions
