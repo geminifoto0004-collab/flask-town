@@ -50,6 +50,7 @@ from blueprints.town_admin_scene_runtime import install_admin_scene_runtime
 from blueprints.town_officer_scene_admin_patch import install_officer_scene_admin_patch
 from blueprints.town_ai_grounded_director import grounded_model_decision
 from blueprints.town_character_director_patch import install_character_director_patch
+from blueprints.town_character_admin_runtime import install_character_admin_runtime
 
 from blueprints import town_page_bp as _town_page_module
 from blueprints.town_latest_page_runtime import latest_town_html
@@ -120,6 +121,7 @@ install_admin_freedom_patch()
 install_character_validation_patch()
 install_character_director_patch()
 install_town_admin_runtime()
+install_character_admin_runtime()
 
 # /api/town/think uses the grounded director after all validation/persistence
 # wrappers are installed.
