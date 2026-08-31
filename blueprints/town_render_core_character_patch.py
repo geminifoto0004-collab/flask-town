@@ -1,30 +1,36 @@
 """Render TiDB-owned core characters on the live game actor positions.
 
-The historical browser snapshot still owns the mature movement/pathfinding loop.
-This patch exposes that live actor array to a TiDB-driven presentation layer so
-character identity can change without turning the new characters into static
-billboards.  No story names are hardcoded here; TiDB/world order is mapped onto
-legacy movement slots until the old renderer is fully retired.
+The historical browser snapshot still owns movement/pathfinding, but it must no
+longer paint a second legacy officer underneath the TiDB character.  This patch
+therefore suppresses only the legacy officer draw function while leaving its
+update/state machine alive, exposes the moving actor array, and paints one
+TiDB-driven sprite at that live position.
 """
 
 
 def patch_render_core_characters(html: str) -> str:
+    # Keep the mature movement engine alive, but expose its actor array from an
+    # UPDATE path (never from the draw path that we are about to suppress).
     expose = "try{window.__townVisualAgents=agents;}catch(_townExposeErr){}"
-    anchors = [
-        "function drawAgent(a){",
-        "function drawOfficer(a){",
+    for anchor in [
         "function updateAgent(a,dt){",
         "function updateOfficer(a,dt){",
-    ]
-    for anchor in anchors:
+        "agents.forEach(a=>{",
+        "agents.forEach(a => {",
+    ]:
         if anchor in html:
             html = html.replace(anchor, anchor + expose, 1)
             break
-    if "window.__townVisualAgents=agents" not in html:
-        for anchor in ["agents.forEach(a=>{", "agents.forEach(a => {"]:
-            if anchor in html:
-                html = html.replace(anchor, expose + anchor, 1)
-                break
+
+    # Critical: REPLACE the old character drawing instead of covering it.  The
+    # old actor continues moving/updating, but its historical sprite/name plate
+    # is not painted at all.  This removes the ghost body visible under the new
+    # TiDB sprite without erasing desks/floor/background pixels.
+    suppress = "if(window.__townCoreRendererReady)return;"
+    for anchor in ["function drawAgent(a){", "function drawOfficer(a){"]:
+        if anchor in html:
+            html = html.replace(anchor, anchor + suppress, 1)
+            break
 
     css = r'''
 <style id="town-core-character-style">
@@ -40,6 +46,10 @@ def patch_render_core_characters(html: str) -> str:
   let canvas=document.getElementById('town-core-character-overlay');
   if(!canvas){canvas=document.createElement('canvas');canvas.id='town-core-character-overlay';canvas.width=640;canvas.height=400;wrap.appendChild(canvas);}
   const c=canvas.getContext('2d');if(!c)return;c.imageSmoothingEnabled=false;
+  // Flip this only after the replacement canvas exists. The historical draw
+  // function checks it and stops drawing the old officer; movement keeps going.
+  window.__townCoreRendererReady=true;
+
   let core=[];let refreshing=false;
   const motion=new Map();
   const fallback=[{x:96,y:236},{x:320,y:236},{x:500,y:236}];
@@ -65,23 +75,22 @@ def patch_render_core_characters(html: str) -> str:
     const fb=fallback[index%fallback.length];
     const tx=live?Number(live.x):(finite(a&&a.x)?Number(a.x):fb.x);
     const ty=live?Number(live.y):(finite(a&&a.y)?Number(a.y):fb.y);
-    if(!m){m={x:tx,y:ty,lastX:tx,lastY:ty,lastAt:now,facing:'down',moving:false,step:0};motion.set(id,m);}
+    if(!m){m={x:tx,y:ty,lastX:tx,lastY:ty,facing:'down',moving:false,step:0};motion.set(id,m);}
     const dx=tx-m.x,dy=ty-m.y,dist=Math.hypot(dx,dy);
-    const gain=(live&&live.x!==undefined)?0.42:0.18;
+    const gain=(live&&live.x!==undefined)?0.55:0.18;
     m.x+=dx*Math.min(1,gain);m.y+=dy*Math.min(1,gain);
     const vx=m.x-m.lastX,vy=m.y-m.lastY;
     m.moving=Math.hypot(vx,vy)>.12 || dist>1.2;
     if(Math.abs(vx)>Math.abs(vy)&&Math.abs(vx)>.05)m.facing=vx>0?'right':'left';
     else if(Math.abs(vy)>.05)m.facing=vy>0?'down':'up';
     if(m.moving)m.step+=.22;else m.step=0;
-    m.lastX=m.x;m.lastY=m.y;m.lastAt=now;
+    m.lastX=m.x;m.lastY=m.y;
     return m;
   }
 
   function label(a,x,y){
     const text=String(a.displayName||a.name||a.characterId||a.slot||'').toUpperCase();if(!text)return;
-    c.font='bold 7px monospace';
-    const w=Math.max(38,Math.ceil(c.measureText(text).width)+10);
+    c.font='bold 7px monospace';const w=Math.max(38,Math.ceil(c.measureText(text).width)+10);
     px(x-w/2-2,y-39,w+4,12,'rgba(18,27,34,.98)');
     c.fillStyle='#fff';c.textAlign='center';c.fillText(text,Math.round(x),Math.round(y-31));
   }
@@ -98,41 +107,27 @@ def patch_render_core_characters(html: str) -> str:
     const stride=m.moving?(Math.sin(m.step)>0?2:-2):0;
 
     px(x-9,y+12,18,3,'rgba(0,0,0,.22)');
-    px(x-8-stride/2,y+4+bob,7,10,'#2f4050');
-    px(x+1+stride/2,y+4-bob,7,10,'#2f4050');
+    px(x-8-stride/2,y+4+bob,7,10,'#2f4050');px(x+1+stride/2,y+4-bob,7,10,'#2f4050');
     px(x-11,y-10+bob,22,16,body);px(x-8,y-8+bob,16,3,accent);
-    px(x-14,y-7+bob,5,12,body);px(x+10,y-7+bob,5,12,body);
-    px(x-8,y-23+bob,16,14,skin);
-
+    px(x-14,y-7+bob,5,12,body);px(x+10,y-7+bob,5,12,body);px(x-8,y-23+bob,16,14,skin);
     if(gender.includes('female')||gender.includes('mujer')||gender.includes('woman')){
       px(x-10,y-27+bob,20,6,hair);px(x-10,y-22+bob,4,15,hair);px(x+7,y-22+bob,4,15,hair);
-    }else{
-      px(x-10,y-27+bob,20,6,hair);px(x-9,y-23+bob,18,3,hair);
-    }
-
+    }else{px(x-10,y-27+bob,20,6,hair);px(x-9,y-23+bob,18,3,hair);}
     if(m.facing!=='up'){
       const eyeShift=m.facing==='left'?-2:(m.facing==='right'?2:0);
       px(x-5+eyeShift,y-16+bob,2,2,'#172126');px(x+3+eyeShift,y-16+bob,2,2,'#172126');
       if(age>=55){px(x-6,y-12+bob,4,2,'#b88970');px(x+3,y-12+bob,4,2,'#b88970');}
       else px(x-2,y-11+bob,5,2,'#9a5d52');
-    }else{
-      px(x-6,y-17+bob,12,4,hair);
-    }
+    }else px(x-6,y-17+bob,12,4,hair);
     if(String(a.workStyle||p.workStyle||'').toLowerCase().includes('dilig'))px(x+12,y-4+bob,5,8,'#e5d08b');
     label(a,x,y+bob);
   }
 
   function frame(now){c.clearRect(0,0,640,400);core.forEach((a,i)=>drawCharacter(a,i,now));requestAnimationFrame(frame);}
-
   async function refresh(){
     if(refreshing)return;refreshing=true;
-    try{
-      const r=await fetch('/api/town/world',{headers:{Accept:'application/json'},cache:'no-store'});if(!r.ok)return;
-      const data=await r.json(),world=data&&data.world||{};
-      core=Array.isArray(world.agents)?world.agents.filter(v=>v&&String(v.name||v.characterId||v.slot||'')):[];
-    }catch(_e){}finally{refreshing=false;}
+    try{const r=await fetch('/api/town/world',{headers:{Accept:'application/json'},cache:'no-store'});if(!r.ok)return;const data=await r.json(),world=data&&data.world||{};core=Array.isArray(world.agents)?world.agents.filter(v=>v&&String(v.name||v.characterId||v.slot||'')):[];}catch(_e){}finally{refreshing=false;}
   }
-
   refresh();setInterval(refresh,650);requestAnimationFrame(frame);
 })();
 </script>
