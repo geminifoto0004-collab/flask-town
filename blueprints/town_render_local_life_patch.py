@@ -1,10 +1,10 @@
-"""API-free local life loop for CUSTOMS AGENT TOWN.
+"""Local life plus occasional one-call AI conversations for CUSTOMS AGENT TOWN.
 
-Ordinary movement and short everyday conversations are generated in the browser
-without calling DeepSeek.  They still use the normal agent_chat action path, so
-speech bubbles, animation, shared dialogue history and TiDB persistence all stay
-on the same pipeline.  DeepSeek remains responsible for richer narrative and
-long-term evolution.
+Ordinary movement/pathfinding stays local and free. When two active characters
+naturally decide to converse, the browser makes one DeepSeek request for the
+whole multi-turn conversation. That request uses TiDB character memory and the
+persisted current-information feed. A tiny scripted conversation is kept only
+as an API/network fallback.
 """
 
 from .town_render_performance_patch import patch_render_performance
@@ -14,10 +14,10 @@ def patch_render_local_life(html: str) -> str:
     marker = "  function sync(){"
     if "function townLocalLifeTick()" not in html and marker in html:
         helper = r'''  let localLifeTimer=rand(12,28);
-  let localChatSeq=0;
+  let aiChatTimer=rand(70,130);
+  let aiChatBusy=false;
   const localChatRecent=[];
 
-  function localDisplayName(a){return String(a?.displayName||a?.name||'同事');}
   function pickLocalChatPair(live){
     if(!Array.isArray(live)||live.length<2)return null;
     const candidates=[];
@@ -31,105 +31,94 @@ def patch_render_local_life(html: str) -> str:
     return candidates[0]||null;
   }
 
-  function localChatTurns(a,b){
-    const an=localDisplayName(a),bn=localDisplayName(b);
-    const topics=[
+  function fallbackChat(pair){
+    if(!pair||typeof applyAiTownActions!=='function')return false;
+    const lines=[
       [
-        ['¿Cómo va la mañana?','今天上午過得怎麼樣？'],
-        ['Con calma, pero todavía me quedan cosas por terminar.','還行，不過還有一些事情沒做完。'],
-        ['Después hacemos una pausa corta.','等一下我們休息一下。'],
-        ['Sí, y luego seguimos.','好，休息一下再繼續。']
+        ['¿Cómo va todo?','最近怎麼樣？'],
+        ['Bien, aquí seguimos con lo nuestro.','還好，就繼續忙自己的事情。'],
+        ['Después conversamos con más calma.','等一下有空再慢慢聊。'],
+        ['Ya, dale.','好啊。']
       ],
       [
-        ['¿Ya tomaste café?','你喝咖啡了嗎？'],
-        ['Todavía no. Estaba pensando ir por uno.','還沒有，我正想去弄一杯。'],
-        ['Si vas, avísame.','你要去的話叫我一下。'],
-        ['Ya, vamos en un rato.','好，等一下我們一起去。']
-      ],
-      [
-        ['¿Está tranquilo hoy por aquí?','今天這邊好像比較安靜？'],
-        ['Por ahora sí, pero puede cambiar rápido.','目前是，不過很快也可能忙起來。'],
-        ['Mejor adelantamos un poco entonces.','那我們先把事情做一些。'],
-        ['Buena idea.','好主意。']
-      ],
-      [
-        ['Tengo ganas de estirar las piernas un poco.','我有點想起來走一走。'],
-        ['Yo también, llevo rato sentado.','我也是，坐很久了。'],
-        ['Damos una vuelta corta y volvemos.','我們走一下再回來。'],
-        ['Ya, pero cortito.','好，不過不要太久。']
-      ],
-      [
-        ['¿Qué vas a hacer a la hora de almuerzo?','你午餐時間要做什麼？'],
-        ['Todavía no sé. Quiero algo simple.','還不知道，我想吃簡單一點。'],
-        ['Después vemos qué hay cerca.','等一下看看附近有什麼。'],
-        ['Dale.','好啊。']
-      ],
-      [
-        ['Hoy se siente largo el día.','今天感覺時間過得有點慢。'],
-        ['Sí, hay días así.','對，有些日子就是這樣。'],
-        ['Por lo menos estamos acompañados.','至少大家一起上班。'],
-        ['Eso ayuda bastante.','這倒是有差。']
+        ['¿Vas por un café después?','等一下要去喝咖啡嗎？'],
+        ['Puede ser, cuando termine esto.','可以啊，等我把這個弄完。'],
+        ['Me avisas entonces.','那你等一下叫我。'],
+        ['Sí.','好。']
       ]
     ];
-    const recentTopics=(Array.isArray(window.__townDialogueHistory)?window.__townDialogueHistory:[]).slice(-4).map(x=>String(x?.localTopic||''));
-    let choices=topics.map((v,i)=>({v,i})).filter(x=>!recentTopics.includes(String(x.i)));
-    if(!choices.length)choices=topics.map((v,i)=>({v,i}));
-    const chosen=choices[Math.floor(Math.random()*choices.length)];
-    const p=chosen.v;
-    const turns=[
-      {speaker:String(a.name),text:p[0][0],text_zh:p[0][1]},
-      {speaker:String(b.name),text:p[1][0],text_zh:p[1][1]},
-      {speaker:String(a.name),text:p[2][0],text_zh:p[2][1]},
-      {speaker:String(b.name),text:p[3][0],text_zh:p[3][1]}
-    ];
-    turns.localTopic=String(chosen.i);
-    return {turns,topic:String(chosen.i),an,bn};
-  }
-
-  function townLocalChat(live){
-    const pair=pickLocalChatPair(live);if(!pair)return false;
-    localChatRecent.push(pair.key);while(localChatRecent.length>3)localChatRecent.shift();
-    const built=localChatTurns(pair.a,pair.b);
-    localChatSeq++;
-    applyAiTownActions([{type:'agent_chat',from:String(pair.a.name),to:String(pair.b.name),turns:built.turns,local:true,localTopic:built.topic,localChatId:'local-'+Date.now()+'-'+localChatSeq}]);
+    const p=lines[Math.floor(Math.random()*lines.length)];
+    applyAiTownActions([{type:'agent_chat',from:String(pair.a.name),to:String(pair.b.name),turns:[
+      {speaker:String(pair.a.name),text:p[0][0],text_zh:p[0][1]},
+      {speaker:String(pair.b.name),text:p[1][0],text_zh:p[1][1]},
+      {speaker:String(pair.a.name),text:p[2][0],text_zh:p[2][1]},
+      {speaker:String(pair.b.name),text:p[3][0],text_zh:p[3][1]}
+    ],localFallback:true}]);
     return true;
   }
 
+  function currentLiveAgents(){
+    if(!Array.isArray(agents))return [];
+    return agents.filter(a=>a&&a.name&&a.state!=='workingShip'&&a.state!=='inspect'&&a.state!=='chat'&&!a.manualOffDuty);
+  }
+
+  async function townAiChatTick(){
+    if(aiChatBusy||typeof applyAiTownActions!=='function')return;
+    const live=currentLiveAgents();if(live.length<2)return;
+    const pair=pickLocalChatPair(live);if(!pair)return;
+    localChatRecent.push(pair.key);while(localChatRecent.length>3)localChatRecent.shift();
+    aiChatBusy=true;
+    try{
+      const world=(typeof compactTownSnapshot==='function')?compactTownSnapshot():{agents:live.map(a=>({name:a.name,displayName:a.displayName,state:a.state,profile:a.profile||{}})),recentDialogue:(Array.isArray(window.__townDialogueHistory)?window.__townDialogueHistory:[]).slice(-8)};
+      const r=await fetch('/api/town/auto-chat',{
+        method:'POST',
+        headers:{'Content-Type':'application/json','Accept':'application/json'},
+        body:JSON.stringify({from:String(pair.a.name),to:String(pair.b.name),world})
+      });
+      const data=await r.json().catch(()=>({}));
+      if(!r.ok||!data.ok||!Array.isArray(data.actions)||!data.actions.length)throw new Error(data.error||'AI chat unavailable');
+      applyAiTownActions(data.actions);
+    }catch(_e){
+      fallbackChat(pair);
+    }finally{
+      aiChatBusy=false;
+    }
+  }
+
   function townLocalLifeTick(){
-    if(!Array.isArray(agents)||!agents.length||typeof applyAiTownActions!=='function')return;
-    const live=agents.filter(a=>a&&a.name&&a.state!=='workingShip'&&a.state!=='inspect'&&a.state!=='chat'&&!a.manualOffDuty);
-    if(!live.length)return;
-    const roll=Math.random();
-    if(roll<.24&&live.length>1){townLocalChat(live);return;}
+    if(typeof applyAiTownActions!=='function')return;
+    const live=currentLiveAgents();if(!live.length)return;
     const actor=live[Math.floor(Math.random()*live.length)];
+    const roll=Math.random();
     let action='wander';
-    if(roll<.38)action='desk';
-    else if(roll<.51)action='files';
-    else if(roll<.62)action='coffee';
-    else if(roll<.71)action='lookSea';
-    else if(roll<.79)action='plant';
-    else if(roll<.86)action='stretch';
-    else if(roll<.93&&live.length>1)action='checkCoworker';
+    if(roll<.20)action='desk';
+    else if(roll<.36)action='files';
+    else if(roll<.49)action='coffee';
+    else if(roll<.60)action='lookSea';
+    else if(roll<.69)action='plant';
+    else if(roll<.77)action='stretch';
+    else if(roll<.88&&live.length>1)action='checkCoworker';
     applyAiTownActions([{type:'agent_action',agent:String(actor.name),action}]);
   }
 
 '''
         html = html.replace(marker, helper + marker, 1)
 
-    # Ordinary life runs locally and does not consume DeepSeek tokens.
+    # Local movement remains frequent and free. Real dialogue is a separate,
+    # much lower-frequency one-call DeepSeek conversation.
     html = html.replace(
         "    updateDogs(dt);",
-        "    updateDogs(dt);\n    localLifeTimer-=dt;if(localLifeTimer<=0){localLifeTimer=rand(16,34);townLocalLifeTick();}",
+        "    updateDogs(dt);\n"
+        "    localLifeTimer-=dt;if(localLifeTimer<=0){localLifeTimer=rand(16,34);townLocalLifeTick();}\n"
+        "    aiChatTimer-=dt;if(aiChatTimer<=0){aiChatTimer=rand(150,360);townAiChatTick();}",
         1,
     )
 
-    # DeepSeek is deliberately lower-frequency: it is for richer scenes and
-    # persistent evolution, not for every coffee break or hallway conversation.
+    # The full world director is lower-frequency than lightweight conversation.
+    # It remains responsible for larger scenes and persistent evolution.
     html = html.replace("let aiAutoTimer=rand(35,75);", "let aiAutoTimer=rand(420,900);")
     html = html.replace("aiAutoTimer=rand(300,900);testDeepSeek();", "aiAutoTimer=rand(900,1800);testDeepSeek();")
     html = html.replace("aiAutoTimer=aiAuto?rand(15,35):999999;", "aiAutoTimer=aiAuto?rand(300,600):999999;")
     html = html.replace("if(aiAuto)aiAutoTimer=rand(8,22);", "if(aiAuto)aiAutoTimer=rand(300,600);")
 
-    # Performance patch is intentionally last here: all earlier browser overlays
-    # already exist, so it can dedupe their world fetches and defer their startup.
     return patch_render_performance(html)
