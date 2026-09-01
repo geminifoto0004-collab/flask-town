@@ -54,6 +54,7 @@ from blueprints.town_admin_scene_runtime import install_admin_scene_runtime
 from blueprints.town_officer_scene_admin_patch import install_officer_scene_admin_patch
 from blueprints.town_ai_grounded_director import grounded_model_decision
 from blueprints.town_character_director_patch import install_character_director_patch
+from blueprints.town_admin_reliability_patch import install_admin_reliability_patch
 from blueprints.town_entity_template_director_patch import install_entity_template_director_patch
 from blueprints.town_character_admin_runtime import install_character_admin_runtime
 
@@ -133,6 +134,7 @@ install_admin_freedom_patch()
 # legacy source-code name list.
 install_character_validation_patch()
 install_character_director_patch()
+install_admin_reliability_patch()
 install_auto_chat_runtime()
 install_cron_tick_runtime()
 install_entity_template_director_patch()
@@ -210,6 +212,7 @@ def town_health():
             "local_life_tick": True,
             "auto_chat_runtime": True,
             "cron_tick_runtime": True,
+            "admin_reliability_guard": True,
             "native_character_renderer": True,
         }
     )
