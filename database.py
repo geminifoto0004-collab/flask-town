@@ -1,7 +1,7 @@
 """Minimal TiDB/MySQL database adapter for standalone TOWN.
 
 This module intentionally has no dependency on the main Flask application's
-config, auth, email, ORDER, or other services.  TOWN and the main service may
+config, auth, email, ORDER, or other services. TOWN and the main service may
 point at the same TiDB database through Render environment variables.
 """
 
@@ -60,13 +60,17 @@ def _connection_config() -> dict:
     if missing:
         raise ValueError("Missing TiDB configuration: " + ", ".join(missing))
 
+    # Match the proven main Flask/TiDB adapter bounds. The admin command already
+    # has its own 12-second DeepSeek read limit; database operations must not add
+    # another 15 seconds per phase and push the whole request into Gunicorn's
+    # worker timeout window.
     config.update(
         charset="utf8mb4",
         autocommit=False,
         cursorclass=pymysql.cursors.DictCursor,
         connect_timeout=10,
-        read_timeout=15,
-        write_timeout=15,
+        read_timeout=10,
+        write_timeout=10,
     )
 
     host = str(config.get("host") or "").lower()
@@ -85,11 +89,15 @@ def get_db_connection():
         return pymysql.connect(**config)
 
     if _POOL is None:
+        # Same sizing strategy as the stable main Flask service. A warm minimum
+        # connection avoids paying a fresh TLS/TiDB connect cost on an admin
+        # story request, while ten total connections leave room for browser
+        # polling, current-context refresh and background town activity.
         _POOL = PooledDB(
             creator=pymysql,
-            mincached=0,
-            maxcached=3,
-            maxconnections=6,
+            mincached=1,
+            maxcached=5,
+            maxconnections=10,
             blocking=True,
             ping=1,
             **config,
