@@ -1,8 +1,8 @@
 """Autonomous cron heartbeat for CUSTOMS AGENT TOWN.
 
-An external scheduler may call /api/town/tick every few minutes.  Each tick gives
+An external scheduler may call /api/town/tick every few minutes. Each tick gives
 DeepSeek the full validated director tool set and lets it decide whether the
-world should chat, work, react, create a visitor/object, or remain quiet.  A
+world should chat, work, react, create a visitor/object, or remain quiet. A
 small TiDB-backed activity state only prevents the town from staying completely
 inactive for too many consecutive ticks; it does not hard-code story content.
 """
@@ -26,6 +26,12 @@ from .town_dialogue_tidb_runtime import _recent_dialogues, _save_dialogue
 
 _STATE_KEY = "main"
 _SCHEMA_READY = False
+_DURABLE_ACTIONS = {
+    "agent_chat", "agent_evolve", "agent_life", "replace_agent", "former_visit",
+    "plant_spawn", "dog_visit", "layout_shuffle", "furniture_add", "furniture_move",
+    "furniture_remove", "object_add", "spawn_entity", "spawn_from_template",
+    "remove_entity", "interact_entity", "entity_scene", "officer_scene",
+}
 
 
 def _close(conn):
@@ -156,7 +162,8 @@ HEARTBEAT RULES:
 - Avoid repeating the same action/topic/person pair just because it is easy.
 - If people converse, use agent_chat and make it a genuine multi-turn conversation informed by recentDialogue, current news/weather and character profiles.
 - If current information is relevant, use only the supplied facts; never invent news details.
-- Activity pressure is {pressure}. Minutes since last visible director activity: {minutes_visible:.1f}. Minutes since last stored conversation: {minutes_chat:.1f}.
+- Activity pressure is {pressure}. Minutes since last durable director activity: {minutes_visible:.1f}. Minutes since last stored conversation: {minutes_chat:.1f}.
+- This heartbeat can run while nobody has the browser open. Purely momentary movement such as coffee/wander may disappear unseen; when activity pressure is high, prefer a conversation or a persistent/world-changing event that leaves evidence in TiDB/world state.
 - When activity pressure is high, make at least one visible or socially meaningful thing happen so the town does not remain lifeless for too long; you still decide WHAT happens and WHO is involved.
 - Prefer 1 to 3 coherent tools rather than noisy action spam.
 """
@@ -219,6 +226,11 @@ def _persist_dialogues(actions, now_ms):
     return saved
 
 
+def _durable_activity(actions):
+    types = [str(a.get("type") or "") for a in actions or [] if isinstance(a, dict)]
+    return any(kind in _DURABLE_ACTIONS for kind in types)
+
+
 def install_cron_tick_runtime():
     @_base.town_ai_bp.route("/tick", methods=["GET", "POST"])
     def town_tick():
@@ -248,13 +260,13 @@ def install_cron_tick_runtime():
                 evolved_world["recentDirectorActions"] = history[-24:]
             _base._write_json(_base._WORLD_PATH, {"saved_at": int(time.time()), "world": evolved_world})
 
-            visible = bool(actions)
+            durable = _durable_activity(actions) or dialogue_count > 0
             chatted = any(isinstance(a, dict) and a.get("type") == "agent_chat" for a in actions)
             next_state = {
                 "tick_count": int(state.get("tick_count") or 0) + 1,
-                "idle_streak": 0 if visible else int(state.get("idle_streak") or 0) + 1,
+                "idle_streak": 0 if durable else int(state.get("idle_streak") or 0) + 1,
                 "last_tick_at_ms": now_ms,
-                "last_visible_at_ms": now_ms if visible else int(state.get("last_visible_at_ms") or 0),
+                "last_visible_at_ms": now_ms if durable else int(state.get("last_visible_at_ms") or 0),
                 "last_chat_at_ms": now_ms if chatted else latest_chat_ms,
                 "last_action_types": [str(a.get("type") or "") for a in actions if isinstance(a, dict)][:12],
             }
@@ -264,6 +276,7 @@ def install_cron_tick_runtime():
                 "model": model,
                 "actions": actions,
                 "action_count": len(actions),
+                "durable_activity": durable,
                 "dialogues_saved": dialogue_count,
                 "activity_pressure": pressure,
                 "idle_streak": next_state["idle_streak"],
