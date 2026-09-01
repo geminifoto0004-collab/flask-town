@@ -1,19 +1,33 @@
 """Reliability guard for manual/admin town directing.
 
 Keep manual commands fast by reading already-persisted public context instead of
-blocking on external news/weather refreshes, and prevent arrival/appearance
-instructions from succeeding as prose without executable spawn actions.
-
-IMPORTANT: this guard never performs a second DeepSeek call inside the same HTTP
-request. If the model fails the executable audit, fail fast so Render/gunicorn
-cannot be held open by two back-to-back model calls.
+blocking on external news/weather refreshes.  Manual story seeds are still
+DeepSeek-directed, but an explicit arrival/appearance request gets a minimal
+executable fallback when the model times out, returns an upstream error, or
+forgets to create the requested entity.  The fallback is generic plumbing, not
+story logic, and never performs a second model call in the same HTTP request.
 """
 
 from __future__ import annotations
 
+import re
+import time
+
 from . import town_admin_runtime as _admin
 from . import town_character_director_patch as _director
 from .town_current_context_runtime import current_context
+
+
+_ARRIVAL_MARKERS = (
+    "來了", "来了", "來一", "来一", "出現", "出现", "進來", "进来", "到訪", "到访",
+    "arrive", "arrived", "comes", "come in", "appear", "appears", "visit", "visits",
+    "llega", "llegan", "aparece", "aparecen", "visita", "visitan",
+)
+
+_CHINESE_NUMBERS = {
+    "一": 1, "二": 2, "兩": 2, "两": 2, "三": 3, "四": 4, "五": 5,
+    "六": 6, "七": 7, "八": 8, "九": 9, "十": 10,
+}
 
 
 def _stored_public_context_for_ai():
@@ -46,12 +60,7 @@ def _stored_recent_news(limit=10):
 
 def _looks_like_new_entity_request(prompt):
     text = str(prompt or "").lower()
-    markers = (
-        "來了", "来了", "來一", "来一", "出現", "出现", "進來", "进来", "到訪", "到访",
-        "arrive", "arrived", "comes", "come in", "appear", "appears", "visit", "visits",
-        "llega", "llegan", "aparece", "aparecen", "visita", "visitan",
-    )
-    return any(marker in text for marker in markers)
+    return any(marker in text for marker in _ARRIVAL_MARKERS)
 
 
 def _has_spawn(actions):
@@ -63,6 +72,114 @@ def _has_spawn(actions):
         isinstance(action, dict) and str(action.get("type") or "") in spawn_types
         for action in (actions or [])
     )
+
+
+def _safe_slug(text):
+    raw = re.sub(r"[^0-9A-Za-z_-]+", "-", str(text or "").strip()).strip("-").lower()
+    return (raw or "arrival")[:36]
+
+
+def _extract_arrival_seed(prompt):
+    """Extract only the explicit visible core from an arrival-style admin seed.
+
+    This is deliberately small and generic.  It does not decide a story, mood,
+    dialogue or relationship.  It only recovers a requested visible entity when
+    the remote model is unavailable.
+    """
+    text = str(prompt or "").strip()
+    if not text:
+        return None
+
+    lower = text.lower()
+    positions = [(lower.find(marker.lower()), marker) for marker in _ARRIVAL_MARKERS if lower.find(marker.lower()) >= 0]
+    if not positions:
+        return None
+    pos, marker = min(positions, key=lambda item: item[0])
+
+    # Chinese typically places the arriving entity before the marker; English/
+    # Spanish may do either.  Prefer the phrase immediately before the marker.
+    subject = text[:pos].strip(" ，,。.!！?？:：;；")
+    if not subject:
+        subject = text[pos + len(marker):].strip(" ，,。.!！?？:：;；")
+    if not subject:
+        return None
+
+    # Drop common directive filler after the visible subject.
+    subject = re.split(r"(?:\s+and\s+|\s+y\s+|，|,|；|;|然後|然后|對話|对话|聊天|自己想|自行導演|自行导演)", subject, maxsplit=1, flags=re.I)[0].strip()
+    if not subject:
+        return None
+
+    count = 1
+    label = subject
+
+    digit_match = re.match(r"^(\d{1,2})\s*(?:個|个|名|位|隻|只|台|輛|辆)?\s*(.+)$", label)
+    if digit_match:
+        count = max(1, min(12, int(digit_match.group(1))))
+        label = digit_match.group(2).strip()
+    else:
+        zh_match = re.match(r"^([一二兩两三四五六七八九十])\s*(?:個|个|名|位|隻|只|台|輛|辆)?\s*(.+)$", label)
+        if zh_match:
+            count = _CHINESE_NUMBERS.get(zh_match.group(1), 1)
+            label = zh_match.group(2).strip()
+
+    # Remove a leading generic verb fragment such as "有" / "突然" without
+    # maintaining any story-specific noun list.
+    label = re.sub(r"^(?:有|突然|忽然|一群|一批)\s*", "", label).strip()
+    if not label:
+        return None
+
+    return {"label": label[:40], "count": count}
+
+
+def _fallback_actions(prompt):
+    seed = _extract_arrival_seed(prompt)
+    if not seed:
+        return []
+
+    label = seed["label"]
+    count = int(seed["count"] or 1)
+    stamp = int(time.time() * 1000) % 100000000
+    base = _safe_slug(label)
+    actions = []
+    for index in range(count):
+        suffix = f"-{index + 1}" if count > 1 else ""
+        display_name = f"{label}{index + 1}" if count > 1 else label
+        actions.append({
+            "type": "spawn_entity",
+            "id": f"fallback-{base}-{stamp}{suffix}"[:64],
+            "name": display_name[:28],
+            # Neutral visible fallback.  The normal AI path remains responsible
+            # for richer semantic typing/visual templates and later behavior.
+            "entityType": "human",
+            "zone": "office_door",
+        })
+    return actions
+
+
+def _fallback_result(prompt, world, reason=""):
+    raw = _fallback_actions(prompt)
+    if not raw:
+        return None
+
+    # Pass through the current validator stack so fallback entities obey the
+    # exact same bounds/type/world rules as model-generated actions.
+    from . import town_ai_bp as _base
+    actions = _base._validate_actions(raw)
+    if not actions:
+        return None
+
+    return {
+        "ok": True,
+        "actions": actions,
+        "model": "fallback",
+        "context": {},
+        "thought": "遠端 AI 暫時失敗；已先保留你明確指定的可見核心，後續交回 AI 繼續導演。",
+        "intent_summary": str(prompt or "")[:140],
+        "must_keep": [str(prompt or "")[:90]],
+        "creative_freedom": ["後續動作、對話與發展由 AI 接續導演"],
+        "director_note": ("fallback:" + str(reason or "remote_ai_unavailable"))[:180],
+        "fallback": True,
+    }
 
 
 def install_admin_reliability_patch():
@@ -98,13 +215,24 @@ EXECUTABLE REPRESENTATION AUDIT — HARD RULES:
     previous_command = _admin._admin_model_command
 
     def reliable_admin_model_command(prompt, world):
-        result = previous_command(prompt, world)
+        try:
+            result = previous_command(prompt, world)
+        except Exception as exc:
+            fallback = _fallback_result(prompt, world, str(exc)[:120])
+            if fallback:
+                return fallback
+            raise
+
         actions = result.get("actions") if isinstance(result, dict) else []
         if not (_looks_like_new_entity_request(prompt) and not _has_spawn(actions)):
             return result
 
-        # Fail fast. Do NOT call DeepSeek again in this same request; a second long
-        # model call is exactly what caused Render/gunicorn 502s on manual scenes.
+        # No second DeepSeek call.  Preserve the explicit visible core locally so
+        # a model formatting mistake cannot make the whole admin command vanish.
+        fallback = _fallback_result(prompt, world, "missing_executable_spawn")
+        if fallback:
+            return fallback
+
         return {
             "ok": False,
             "actions": [],
