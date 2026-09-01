@@ -36,6 +36,7 @@ from blueprints.town_generic_scene_runtime import install_generic_scene_runtime
 from blueprints.town_world_tidb_runtime import install_tidb_world_runtime
 from blueprints.town_dialogue_tidb_runtime import install_tidb_dialogue_runtime
 from blueprints.town_ai_auto_chat_runtime import install_auto_chat_runtime
+from blueprints.town_cron_tick_runtime import install_cron_tick_runtime
 from blueprints.town_character_tidb_runtime import (
     character_ids,
     install_character_runtime,
@@ -133,6 +134,7 @@ install_admin_freedom_patch()
 install_character_validation_patch()
 install_character_director_patch()
 install_auto_chat_runtime()
+install_cron_tick_runtime()
 install_entity_template_director_patch()
 install_town_admin_runtime()
 install_character_admin_runtime()
@@ -207,6 +209,7 @@ def town_health():
             "town_html_cached": True,
             "local_life_tick": True,
             "auto_chat_runtime": True,
+            "cron_tick_runtime": True,
             "native_character_renderer": True,
         }
     )
