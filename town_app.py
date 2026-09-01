@@ -39,6 +39,7 @@ from blueprints.town_world_tidb_runtime import install_tidb_world_runtime
 from blueprints.town_dialogue_tidb_runtime import install_tidb_dialogue_runtime
 from blueprints.town_ai_auto_chat_runtime import install_auto_chat_runtime
 from blueprints.town_cron_tick_runtime import install_cron_tick_runtime
+from blueprints.town_state_merge_runtime import install_state_merge_guard
 from blueprints.town_character_tidb_runtime import (
     character_ids,
     install_character_runtime,
@@ -192,6 +193,9 @@ _town_page_module._patched_town_html = lambda: _TOWN_HTML_CACHE
 
 app.register_blueprint(town_ai_bp)
 app.register_blueprint(town_page_bp)
+# The native page periodically POSTs a partial/legacy world snapshot. Protect
+# TiDB-owned AI entities/objects/dialogue from being erased by that stale state.
+_STATE_MERGE_GUARD = install_state_merge_guard(app)
 
 
 @app.get("/")
@@ -222,6 +226,7 @@ def town_health():
             "admin_reliability_guard": True,
             "semantic_entity_compat": True,
             "world_scene_runtime": True,
+            "state_merge_guard": bool(_STATE_MERGE_GUARD),
             "native_character_renderer": True,
         }
     )
