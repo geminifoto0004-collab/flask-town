@@ -108,13 +108,13 @@ def dynamic_call_model(world, evolution, retry_note=""):
         "tools": DIRECTOR_TOOLS,
         "tool_choice": "auto" if evolution else "required",
         "temperature": 1.12,
-        "max_tokens": 1900,
+        "max_tokens": 1600,
     }
     response = requests.post(
         "https://api.deepseek.com/chat/completions",
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
         json=payload,
-        timeout=35,
+        timeout=(4, 20),
     )
     if not response.ok:
         raise RuntimeError(f"DeepSeek HTTP {response.status_code}: {response.text[:260]}")
@@ -150,14 +150,14 @@ def dynamic_admin_model_command(prompt, world):
         ],
         "tools": tools,
         "tool_choice": "required",
-        "temperature": 0.70,
-        "max_tokens": 2100,
+        "temperature": 0.66,
+        "max_tokens": 1500,
     }
     response = requests.post(
         "https://api.deepseek.com/chat/completions",
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
         json=payload,
-        timeout=(4, 25),
+        timeout=(4, 18),
     )
     if not response.ok:
         raise RuntimeError(f"DeepSeek HTTP {response.status_code}: {response.text[:220]}")
