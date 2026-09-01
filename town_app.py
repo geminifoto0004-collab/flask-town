@@ -33,6 +33,7 @@ from blueprints.town_action_capacity_patch import install_action_capacity_patch
 from blueprints.town_relationship_runtime import install_relationship_runtime
 from blueprints.town_officer_scene_runtime import install_officer_scene_runtime
 from blueprints.town_generic_scene_runtime import install_generic_scene_runtime
+from blueprints.town_entity_type_compat_patch import install_entity_type_compat_patch
 from blueprints.town_world_tidb_runtime import install_tidb_world_runtime
 from blueprints.town_dialogue_tidb_runtime import install_tidb_dialogue_runtime
 from blueprints.town_ai_auto_chat_runtime import install_auto_chat_runtime
@@ -116,6 +117,10 @@ install_officer_scene_runtime()
 # caps cannot silently erase later actors in a larger admin scene.
 install_action_capacity_patch()
 install_generic_scene_runtime()
+# This must be the outermost generic entity validator. AI semantic kinds such as
+# creature/ghost/robot/person are normalized to renderer base classes instead of
+# being silently discarded by the older five-class runtime.
+install_entity_type_compat_patch()
 install_tidb_world_runtime()
 install_tidb_dialogue_runtime()
 
@@ -213,6 +218,7 @@ def town_health():
             "auto_chat_runtime": True,
             "cron_tick_runtime": True,
             "admin_reliability_guard": True,
+            "semantic_entity_compat": True,
             "native_character_renderer": True,
         }
     )
