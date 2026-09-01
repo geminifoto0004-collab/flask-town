@@ -14,7 +14,7 @@ def patch_render_local_life(html: str) -> str:
     marker = "  function sync(){"
     if "function townLocalLifeTick()" not in html and marker in html:
         helper = r'''  let localLifeTimer=rand(12,28);
-  let aiChatTimer=rand(70,130);
+  let aiChatTimer=rand(25,50);
   let aiChatBusy=false;
   const localChatRecent=[];
 
@@ -105,12 +105,13 @@ def patch_render_local_life(html: str) -> str:
         html = html.replace(marker, helper + marker, 1)
 
     # Local movement remains frequent and free. Real dialogue is a separate,
-    # much lower-frequency one-call DeepSeek conversation.
+    # lower-frequency one-call DeepSeek conversation. First chat is intentionally
+    # soon after page load so the user can see that autonomous life is working.
     html = html.replace(
         "    updateDogs(dt);",
         "    updateDogs(dt);\n"
         "    localLifeTimer-=dt;if(localLifeTimer<=0){localLifeTimer=rand(16,34);townLocalLifeTick();}\n"
-        "    aiChatTimer-=dt;if(aiChatTimer<=0){aiChatTimer=rand(150,360);townAiChatTick();}",
+        "    aiChatTimer-=dt;if(aiChatTimer<=0){aiChatTimer=rand(90,180);townAiChatTick();}",
         1,
     )
 
