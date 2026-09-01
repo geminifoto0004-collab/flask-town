@@ -3,6 +3,10 @@
 Keep manual commands fast by reading already-persisted public context instead of
 blocking on external news/weather refreshes, and prevent arrival/appearance
 instructions from succeeding as prose without executable spawn actions.
+
+IMPORTANT: this guard never performs a second DeepSeek call inside the same HTTP
+request. If the model fails the executable audit, fail fast so Render/gunicorn
+cannot be held open by two back-to-back model calls.
 """
 
 from __future__ import annotations
@@ -42,7 +46,6 @@ def _stored_recent_news(limit=10):
 
 def _looks_like_new_entity_request(prompt):
     text = str(prompt or "").lower()
-    # Generic arrival/appearance semantics only; no story- or actor-specific names.
     markers = (
         "來了", "来了", "來一", "来一", "出現", "出现", "進來", "进来", "到訪", "到访",
         "arrive", "arrived", "comes", "come in", "appear", "appears", "visit", "visits",
@@ -52,14 +55,19 @@ def _looks_like_new_entity_request(prompt):
 
 
 def _has_spawn(actions):
-    spawn_types = {"spawn_entity", "spawn_from_template", "world_object_spawn", "sea_creature_spawn", "dog_visit", "former_visit"}
-    return any(isinstance(action, dict) and str(action.get("type") or "") in spawn_types for action in (actions or []))
+    spawn_types = {
+        "spawn_entity", "spawn_from_template", "world_object_spawn",
+        "sea_creature_spawn", "dog_visit", "former_visit",
+    }
+    return any(
+        isinstance(action, dict) and str(action.get("type") or "") in spawn_types
+        for action in (actions or [])
+    )
 
 
 def install_admin_reliability_patch():
     # Manual commands use the already-persisted snapshot. Background refresh/cron
-    # remains responsible for network I/O, keeping the request comfortably below
-    # the Render/gunicorn timeout budget.
+    # remains responsible for network I/O.
     _director._public_context_for_ai = _stored_public_context_for_ai
     _director.recent_news_for_ai = _stored_recent_news
 
@@ -73,7 +81,8 @@ EXECUTABLE REPRESENTATION AUDIT — HARD RULES:
 - If the administrator explicitly requests N new actors/entities, emit N distinct creation calls with distinct stable ids. Never satisfy quantity only in intentSummary, directorNote, prose, or dialogue.
 - A sentence saying somebody arrived/appeared/entered is NOT execution. Every newly appearing person, animal, vehicle, item or decoration must have a corresponding executable creation tool.
 - entity_scene is one actor's complete scene. For multiple new actors, use multiple entity_scene calls or multiple spawn calls.
-- Before finishing, compare every explicit requested new entity against your tool calls and add any missing creation calls.
+- Before finishing, compare every explicit requested new entity against your tool calls and add any missing creation calls IN THIS SAME RESPONSE.
+- There will be no second model retry for a missing spawn. The first response must be executable and complete.
 """
 
     _director._system_prompt = system_prompt
@@ -86,24 +95,13 @@ EXECUTABLE REPRESENTATION AUDIT — HARD RULES:
         if not (_looks_like_new_entity_request(prompt) and not _has_spawn(actions)):
             return result
 
-        audit_prompt = (
-            str(prompt).strip()
-            + "\n\nEXECUTABLE AUDIT: Your prior attempt described an arrival/appearance but produced no creation action. "
-              "Rebuild the scene using executable tools. Every explicitly requested new actor/entity must get its own distinct "
-              "spawn_entity, spawn_from_template, or entity_scene call. One entity_scene creates exactly one actor. "
-              "Do not count prose, intentSummary, directorNote, movement, or an existing core-officer action as creating the requested entity."
-        )
-        retry = previous_command(audit_prompt, world)
-        retry_actions = retry.get("actions") if isinstance(retry, dict) else []
-        if _has_spawn(retry_actions):
-            return retry
-
-        # Never claim a visible scene succeeded when no entity was actually created.
+        # Fail fast. Do NOT call DeepSeek again in this same request; a second long
+        # model call is exactly what caused Render/gunicorn 502s on manual scenes.
         return {
             "ok": False,
             "actions": [],
-            "model": (retry or {}).get("model") if isinstance(retry, dict) else "",
-            "context": (retry or {}).get("context") if isinstance(retry, dict) else {},
+            "model": (result or {}).get("model") if isinstance(result, dict) else "",
+            "context": (result or {}).get("context") if isinstance(result, dict) else {},
             "thought": "AI 沒有產生可執行的實體生成指令，因此本輪不宣告場景成功。",
             "error": "missing_executable_spawn",
         }
