@@ -56,6 +56,7 @@ from blueprints.town_admin_scene_runtime import install_admin_scene_runtime
 from blueprints.town_officer_scene_admin_patch import install_officer_scene_admin_patch
 from blueprints.town_ai_grounded_director import grounded_model_decision
 from blueprints.town_character_director_patch import install_character_director_patch
+from blueprints.town_admin_fast_path_patch import install_admin_fast_path_patch
 from blueprints.town_admin_reliability_patch import install_admin_reliability_patch
 from blueprints.town_entity_template_director_patch import install_entity_template_director_patch
 from blueprints.town_character_admin_runtime import install_character_admin_runtime
@@ -142,6 +143,9 @@ install_admin_freedom_patch()
 # legacy source-code name list.
 install_character_validation_patch()
 install_character_director_patch()
+# Manual/admin AI must stay comfortably inside the Gunicorn request budget:
+# stored TiDB context only, compact universal tools, 12-second DeepSeek bound.
+install_admin_fast_path_patch()
 install_admin_reliability_patch()
 install_auto_chat_runtime()
 install_cron_tick_runtime()
@@ -225,6 +229,8 @@ def town_health():
             "cron_tick_runtime": True,
             "admin_reliability_guard": True,
             "admin_core_fallback": True,
+            "admin_fast_path": True,
+            "admin_deepseek_read_timeout_seconds": 12,
             "semantic_entity_compat": True,
             "world_scene_runtime": True,
             "state_merge_guard": bool(_STATE_MERGE_GUARD),
