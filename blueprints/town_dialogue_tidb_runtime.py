@@ -2,7 +2,8 @@
 
 On Render the existing database layer points at TiDB. The browser posts only
 validated/executed dialogue here, and every viewer reads the same recent history.
-UI language preferences remain browser-local.
+UI language preferences remain browser-local. Character IDs are read from the
+TiDB character runtime rather than hard-coded legacy officer names.
 """
 
 import time
@@ -13,9 +14,16 @@ from flask import jsonify, request
 from database import execute_sql, get_db_connection
 from . import town_ai_bp as _base
 
-_AGENT_IDS = {"MIA", "ANA", "LIA"}
 _SCHEMA_READY = False
 _SCHEMA_RETRY_AT = 0.0
+
+
+def _agent_ids():
+    try:
+        from .town_character_tidb_runtime import character_id_set
+        return set(character_id_set())
+    except Exception:
+        return set()
 
 
 def _close(conn):
@@ -40,8 +48,8 @@ def _ensure_schema(force=False):
             CREATE TABLE IF NOT EXISTS town_dialogue_messages (
                 message_id VARCHAR(96) PRIMARY KEY,
                 conversation_id VARCHAR(96) NOT NULL,
-                speaker VARCHAR(18) NOT NULL,
-                listener VARCHAR(18),
+                speaker VARCHAR(64) NOT NULL,
+                listener VARCHAR(64),
                 text_es TEXT NOT NULL,
                 text_zh TEXT,
                 created_at_ms BIGINT NOT NULL,
@@ -60,11 +68,11 @@ def _ensure_schema(force=False):
             _close(conn)
 
 
-def _clean_turn(turn, members):
+def _clean_turn(turn, members, valid_ids):
     if not isinstance(turn, dict):
         return None
     speaker = str(turn.get("speaker") or "").upper()
-    if speaker not in _AGENT_IDS or speaker not in members:
+    if speaker not in valid_ids or speaker not in members:
         return None
     text_es = str(turn.get("text") or turn.get("text_es") or "").strip()[:500]
     text_zh = str(turn.get("textZh") or turn.get("text_zh") or "").strip()[:500]
@@ -77,13 +85,16 @@ def _clean_turn(turn, members):
 def _save_dialogue(payload):
     if not _ensure_schema():
         return False, "database unavailable"
+    valid_ids = _agent_ids()
+    if not valid_ids:
+        return False, "no active core characters"
     members = [str(v or "").upper() for v in (payload.get("members") or [])]
-    members = [v for v in members if v in _AGENT_IDS][:2]
+    members = [v for v in members if v in valid_ids][:2]
     if len(members) != 2 or members[0] == members[1]:
         return False, "invalid members"
     turns = []
     for turn in payload.get("turns") if isinstance(payload.get("turns"), list) else []:
-        cleaned = _clean_turn(turn, members)
+        cleaned = _clean_turn(turn, members, valid_ids)
         if cleaned:
             turns.append(cleaned)
         if len(turns) >= 12:
@@ -134,13 +145,12 @@ def _save_dialogue(payload):
 def _recent_dialogues(limit=12):
     if not _ensure_schema():
         return []
+    valid_ids = _agent_ids()
     limit = max(1, min(30, int(limit or 12)))
     conn = None
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        # Fetch a bounded message window, then group it in Python. This keeps the
-        # SQL portable across TiDB/MySQL, PostgreSQL and SQLite development.
         execute_sql(cur, """
             SELECT conversation_id, speaker, listener, text_es, text_zh, created_at_ms, turn_index
             FROM town_dialogue_messages
@@ -155,8 +165,6 @@ def _recent_dialogues(limit=12):
             if isinstance(row, dict):
                 getter = row.get
             else:
-                # Adapted database cursors normally return dict rows, but keep a
-                # tuple fallback for local development.
                 values = list(row)
                 keys = ["conversation_id", "speaker", "listener", "text_es", "text_zh", "created_at_ms", "turn_index"]
                 data = dict(zip(keys, values))
@@ -178,16 +186,19 @@ def _recent_dialogues(limit=12):
             speaker = str(getter("speaker") or "").upper()
             listener = str(getter("listener") or "").upper()
             for person in (speaker, listener):
-                if person in _AGENT_IDS and person not in item["members"]:
+                if person in valid_ids and person not in item["members"]:
                     item["members"].append(person)
             item["turns"].append({
                 "speaker": speaker,
                 "text": str(getter("text_es") or ""),
                 "text_zh": str(getter("text_zh") or ""),
+                "turn_index": int(getter("turn_index") or 0),
             })
         grouped = grouped[-limit:]
         for item in grouped:
-            item["turns"].sort(key=lambda turn: next((i for i, r in enumerate(rows) if str((r.get("conversation_id") if isinstance(r, dict) else r[0]) or "") == item["id"] and str((r.get("speaker") if isinstance(r, dict) else r[1]) or "") == turn["speaker"] and str((r.get("text_es") if isinstance(r, dict) else r[3]) or "") == turn["text"]), 0))
+            item["turns"].sort(key=lambda turn: int(turn.get("turn_index") or 0))
+            for turn in item["turns"]:
+                turn.pop("turn_index", None)
             item["text"] = " ".join(f"{t['speaker']}: {t['text']}" for t in item["turns"])[:1200]
         return grouped
     except Exception:
@@ -198,8 +209,6 @@ def _recent_dialogues(limit=12):
 
 
 def install_tidb_dialogue_runtime():
-    # Do not make app startup depend on TiDB availability. The first request will
-    # create the table safely and retry later if the database is temporarily down.
     _ensure_schema()
 
     @_base.town_ai_bp.route("/dialogues", methods=["GET", "POST", "OPTIONS"])
@@ -218,9 +227,6 @@ def install_tidb_dialogue_runtime():
 
     @_base.town_ai_bp.after_request
     def inject_shared_dialogue_history(response):
-        # /world is created by an older runtime and reads the JSON snapshot.
-        # Inject the database-backed dialogue history at the response boundary so
-        # every browser gets the same conversations without rewriting that route.
         if request.method == "GET" and request.path.rstrip("/").endswith("/api/town/world") and response.is_json:
             try:
                 data = response.get_json(silent=True)
