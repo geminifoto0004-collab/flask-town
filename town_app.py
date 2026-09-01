@@ -35,6 +35,7 @@ from blueprints.town_officer_scene_runtime import install_officer_scene_runtime
 from blueprints.town_generic_scene_runtime import install_generic_scene_runtime
 from blueprints.town_world_tidb_runtime import install_tidb_world_runtime
 from blueprints.town_dialogue_tidb_runtime import install_tidb_dialogue_runtime
+from blueprints.town_ai_auto_chat_runtime import install_auto_chat_runtime
 from blueprints.town_character_tidb_runtime import (
     character_ids,
     install_character_runtime,
@@ -131,6 +132,7 @@ install_admin_freedom_patch()
 # legacy source-code name list.
 install_character_validation_patch()
 install_character_director_patch()
+install_auto_chat_runtime()
 install_entity_template_director_patch()
 install_town_admin_runtime()
 install_character_admin_runtime()
@@ -186,6 +188,11 @@ def town_root():
     return redirect("/customs-town")
 
 
+@app.get("/ping")
+def town_ping():
+    return "OK", 200, {"Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store"}
+
+
 @app.get("/health")
 def town_health():
     return jsonify(
@@ -199,6 +206,7 @@ def town_health():
             "entity_template_count": len(template_catalog()),
             "town_html_cached": True,
             "local_life_tick": True,
+            "auto_chat_runtime": True,
             "native_character_renderer": True,
         }
     )
