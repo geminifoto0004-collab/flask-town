@@ -39,7 +39,6 @@ from blueprints.town_world_tidb_runtime import install_tidb_world_runtime
 from blueprints.town_dialogue_tidb_runtime import install_tidb_dialogue_runtime
 from blueprints.town_ai_auto_chat_runtime import install_auto_chat_runtime
 from blueprints.town_cron_tick_runtime import install_cron_tick_runtime
-from blueprints.town_state_merge_runtime import install_state_merge_guard
 from blueprints.town_character_tidb_runtime import (
     character_ids,
     install_character_runtime,
@@ -60,6 +59,7 @@ from blueprints.town_character_director_patch import install_character_director_
 from blueprints.town_admin_reliability_patch import install_admin_reliability_patch
 from blueprints.town_entity_template_director_patch import install_entity_template_director_patch
 from blueprints.town_character_admin_runtime import install_character_admin_runtime
+from blueprints.town_state_merge_guard import install_state_merge_guard
 
 from blueprints import town_page_bp as _town_page_module
 from blueprints.town_latest_page_runtime import latest_town_html
@@ -224,6 +224,7 @@ def town_health():
             "auto_chat_runtime": True,
             "cron_tick_runtime": True,
             "admin_reliability_guard": True,
+            "admin_core_fallback": True,
             "semantic_entity_compat": True,
             "world_scene_runtime": True,
             "state_merge_guard": bool(_STATE_MERGE_GUARD),
