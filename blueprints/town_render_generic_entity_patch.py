@@ -140,6 +140,15 @@ def patch_render_generic_entities(html: str) -> str:
     const ids=new Set(incoming.map(v=>String(v&&v.id||'')));
     [...entities.keys()].forEach(id=>{if(!ids.has(id)&&!entities.get(id)?.current)entities.delete(id);});
   }
+
+  // Stable public bridge used by the admin UI and diagnostics.  Expose it
+  // directly from the renderer itself instead of relying on a later HTML
+  // string patch to rediscover this private function.
+  window.__townMergeGenericWorld=mergeWorld;
+  window.__townGenericEntityCount=()=>entities.size;
+  window.__townGenericEntityIds=()=>[...entities.keys()];
+  window.TOWN_GENERIC_ENTITY_RENDERER=true;
+
   async function refresh(){
     if(refreshing)return;refreshing=true;
     try{const r=await fetch('/api/town/world',{headers:{Accept:'application/json'}});if(!r.ok)return;const data=await r.json();mergeWorld(data&&data.world||{});}catch(_e){}finally{refreshing=false;}
