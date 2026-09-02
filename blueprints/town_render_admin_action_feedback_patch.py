@@ -57,6 +57,23 @@ def patch_render_admin_action_feedback(html: str) -> str:
           else log('AI 即時動作橋接尚未就緒，等待共同世界同步');
         }catch(err){log('AI 即時動作顯示失敗：'+String(err&&err.message||err));}
       }
+      const hasGenericSpawn=actions.some(a=>a&&(a.type==='spawn_entity'||a.type==='spawn_from_template'));
+      const serverEntities=Array.isArray(data&&data.world&&data.world.genericEntities)?data.world.genericEntities:[];
+      try{
+        if(data&&data.world&&typeof window.__townMergeGenericWorld==='function'){
+          window.__townMergeGenericWorld(data.world);
+          if(typeof window.__townInvalidateWorldFetch==='function')window.__townInvalidateWorldFetch();
+        }
+      }catch(err){log('共同世界即時同步失敗：'+String(err&&err.message||err));}
+      if(hasGenericSpawn){
+        const rendererCount=typeof window.__townGenericEntityCount==='function'?window.__townGenericEntityCount():'未連接';
+        log('共同世界實體：後端 '+serverEntities.length+' / renderer '+rendererCount);
+        if(data.spawn_persistence_repaired)log('生成實體原本未落地，伺服器已自動補寫 TiDB');
+        if(Array.isArray(data.missing_spawn_ids_after_repair)&&data.missing_spawn_ids_after_repair.length){
+          log('生成實體仍未落地：'+data.missing_spawn_ids_after_repair.join(', '));
+        }
+        if(typeof window.__townMergeGenericWorld!=='function')log('generic renderer bridge 未連接');
+      }
       if(data.director_note)log('AI 優化：'+String(data.director_note).slice(0,180));
       if(data.duplicate)log('這個 command_id 已執行過，本次沒有重複建立物件');"""
     html = html.replace(old, new, 1)
