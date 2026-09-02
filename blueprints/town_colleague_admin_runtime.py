@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 
+from flask import jsonify
+
 from database import execute_sql, get_db_connection
 from . import town_ai_bp as _base
 from .town_ai_director_runtime import DIRECTOR_TOOLS, _fn
@@ -18,6 +20,8 @@ from .town_character_tidb_runtime import (
     character_context,
     refresh_runtime_character_bindings,
 )
+
+_ROUTES_READY = False
 
 
 def _text(value, limit):
@@ -134,8 +138,36 @@ def _save_colleague(action):
         conn.close()
 
 
+def _install_routes_once():
+    global _ROUTES_READY
+    if _ROUTES_READY:
+        return
+
+    @_base.town_ai_bp.get("/colleagues")
+    def town_colleagues_get():
+        rows = character_context(force=True)
+        return jsonify({
+            "ok": True,
+            "count": len(rows),
+            "characters": [
+                {
+                    "id": row.get("id"),
+                    "name": row.get("name") or row.get("id"),
+                    "gender": row.get("gender") or "",
+                    "birthYear": row.get("birthYear"),
+                    "workStyle": row.get("workStyle") or "",
+                    "displayOrder": row.get("displayOrder", 0),
+                }
+                for row in rows
+            ],
+        })
+
+    _ROUTES_READY = True
+
+
 def install_colleague_admin_runtime():
     _ensure_tool()
+    _install_routes_once()
     previous_validate = _base._validate_actions
     previous_apply = _base._apply_persistent_actions
 
@@ -157,7 +189,10 @@ def install_colleague_admin_runtime():
     def apply(world, actions):
         actions = actions or []
         personnel = [a for a in actions if isinstance(a, dict) and a.get("type") == "upsert_colleague"]
-        evolved = previous_apply(world, [a for a in actions if not (isinstance(a, dict) and a.get("type") == "upsert_colleague")])
+        evolved = previous_apply(
+            world,
+            [a for a in actions if not (isinstance(a, dict) and a.get("type") == "upsert_colleague")],
+        )
         if not personnel:
             return evolved
 
@@ -166,17 +201,22 @@ def install_colleague_admin_runtime():
         refresh_runtime_character_bindings(force=True)
         evolved = _merge_world_characters(evolved)
         evolved["characterProfiles"] = [
-            {"name": row.get("id"), "profile": {
-                "gender": row.get("gender") or "",
-                "birthYear": row.get("birthYear"),
-                "maritalStatus": row.get("maritalStatus") or "",
-                "partnerLabel": row.get("partnerLabel") or "",
-                "childrenCount": row.get("childrenCount", 0),
-                "careerState": row.get("careerState") or "active",
-                "workStyle": row.get("workStyle") or "",
-                "personalityNotes": row.get("personalityNotes") or "",
-                "familyNotes": row.get("familyNotes") or "",
-            }} for row in character_context(force=True)
+            {
+                "name": row.get("id"),
+                "displayName": row.get("name") or row.get("id"),
+                "profile": {
+                    "gender": row.get("gender") or "",
+                    "birthYear": row.get("birthYear"),
+                    "maritalStatus": row.get("maritalStatus") or "",
+                    "partnerLabel": row.get("partnerLabel") or "",
+                    "childrenCount": row.get("childrenCount", 0),
+                    "careerState": row.get("careerState") or "active",
+                    "workStyle": row.get("workStyle") or "",
+                    "personalityNotes": row.get("personalityNotes") or "",
+                    "familyNotes": row.get("familyNotes") or "",
+                },
+            }
+            for row in character_context(force=True)
         ]
         return evolved
 
