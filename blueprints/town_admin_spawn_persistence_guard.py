@@ -77,7 +77,9 @@ def install_admin_spawn_persistence_guard(app):
             return response
 
         actions = data.get("actions") if isinstance(data.get("actions"), list) else []
-        expected = _spawn_ids(actions)
+        # A duplicate command_id is a replay of an already-finished request.  Do
+        # not resurrect an entity that may have legitimately left afterwards.
+        expected = [] if data.get("duplicate") else _spawn_ids(actions)
         repaired = False
         missing_before = []
 
