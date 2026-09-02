@@ -19,6 +19,7 @@ import time
 from flask import jsonify, request
 
 from . import town_ai_bp as _base
+from .town_admin_spawn_persistence_guard import install_admin_spawn_persistence_guard
 from .town_world_lock_runtime import WORLD_LOCK, install_world_lock_runtime
 
 
@@ -36,9 +37,9 @@ _SERVER_OWNED_FIELDS = (
 
 
 def install_state_merge_guard(app):
-    # Install here, after all normal TOWN runtimes have already wrapped
-    # _read_json/_write_json. This makes the lock cover the authoritative TiDB
-    # world adapter rather than an early local-JSON implementation.
+    # Install only after TiDB runtime and all world wrappers are bound, so the
+    # lock wraps the authoritative storage functions rather than startup-local
+    # JSON helpers.
     install_world_lock_runtime()
 
     endpoint = "town_ai.save_state"
@@ -46,6 +47,7 @@ def install_state_merge_guard(app):
     if previous is None:
         return False
     if getattr(previous, "_town_state_merge_guard", False):
+        install_admin_spawn_persistence_guard(app)
         return True
 
     def guarded_save_state():
@@ -81,11 +83,15 @@ def install_state_merge_guard(app):
             "ok": True,
             "merge_guard": True,
             "atomic": True,
-            "world_lock": True,
             "preserved": preserved,
             "generic_entity_count": len(world.get("genericEntities") or []) if isinstance(world, dict) else 0,
         })
 
     guarded_save_state._town_state_merge_guard = True
     app.view_functions[endpoint] = guarded_save_state
+
+    # The admin route is registered on the same blueprint.  Verify every
+    # successful spawn against an authoritative TiDB readback before returning
+    # it to the browser.
+    install_admin_spawn_persistence_guard(app)
     return True
