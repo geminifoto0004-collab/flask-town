@@ -7,6 +7,7 @@ persisted current-information feed. A tiny scripted conversation is kept only
 as an API/network fallback.
 """
 
+from .town_render_admin_entity_sync_patch import patch_render_admin_entity_sync
 from .town_render_performance_patch import patch_render_performance
 
 
@@ -122,4 +123,9 @@ def patch_render_local_life(html: str) -> str:
     html = html.replace("aiAutoTimer=aiAuto?rand(15,35):999999;", "aiAutoTimer=aiAuto?rand(300,600):999999;")
     html = html.replace("if(aiAuto)aiAutoTimer=rand(8,22);", "if(aiAuto)aiAutoTimer=rand(300,600);")
 
+    # Admin command responses already contain the authoritative evolved world.
+    # Feed that world directly into the existing generic-entity overlay before
+    # the polling/performance layer is applied, so newly spawned actors are
+    # visible immediately instead of waiting on a stale cached /world response.
+    html = patch_render_admin_entity_sync(html)
     return patch_render_performance(html)
