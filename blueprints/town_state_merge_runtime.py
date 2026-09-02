@@ -19,7 +19,7 @@ import time
 from flask import jsonify, request
 
 from . import town_ai_bp as _base
-from .town_world_lock_runtime import WORLD_LOCK
+from .town_world_lock_runtime import WORLD_LOCK, install_world_lock_runtime
 
 
 _SERVER_OWNED_FIELDS = (
@@ -36,6 +36,11 @@ _SERVER_OWNED_FIELDS = (
 
 
 def install_state_merge_guard(app):
+    # Install here, after all normal TOWN runtimes have already wrapped
+    # _read_json/_write_json. This makes the lock cover the authoritative TiDB
+    # world adapter rather than an early local-JSON implementation.
+    install_world_lock_runtime()
+
     endpoint = "town_ai.save_state"
     previous = app.view_functions.get(endpoint)
     if previous is None:
@@ -76,6 +81,7 @@ def install_state_merge_guard(app):
             "ok": True,
             "merge_guard": True,
             "atomic": True,
+            "world_lock": True,
             "preserved": preserved,
             "generic_entity_count": len(world.get("genericEntities") or []) if isinstance(world, dict) else 0,
         })
