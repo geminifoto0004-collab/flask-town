@@ -2,9 +2,8 @@
 
 A whole multi-turn conversation costs one DeepSeek request. The request uses the
 same TiDB character configuration, recent dialogue memory and persisted current
-public context as the main director. The browser may call this occasionally when
-two on-duty characters naturally decide to chat. Ordinary movement remains
-local and free; a local scripted chat is only a network/API fallback.
+public context as the main director. Conversation topic modes rotate so news is
+an occasional source of texture rather than the default subject of every chat.
 """
 
 from __future__ import annotations
@@ -26,6 +25,33 @@ from .town_current_context_runtime import current_context, recent_news_for_ai
 _INSTALLED = False
 _RATE_LOCK = threading.Lock()
 _LAST_PAIR_CALL = {}
+_TOPIC_LOCK = threading.Lock()
+_PAIR_LAST_TOPIC = {}
+_TOPIC_CURSOR = 0
+
+# This is conversational variety plumbing, not character/story hardcoding. The
+# model still invents the actual subject from TiDB profiles and current world.
+_TOPIC_MODES = (
+    "personal_life",
+    "work_small_talk",
+    "food_break",
+    "family_and_plans",
+    "hobbies_and_memories",
+    "coworker_social",
+    "everyday_chile",
+    "current_news",
+)
+
+_TOPIC_GUIDANCE = {
+    "personal_life": "Talk about ordinary personal life, mood, routines, errands, sleep, purchases, home, or something small that happened recently. Do NOT turn it into news commentary.",
+    "work_small_talk": "Talk about a small concrete work annoyance, funny routine, paperwork habit, customer/coworker behavior, break-time observation, or workplace plan. Avoid major news unless one speaker explicitly connects it.",
+    "food_break": "Talk naturally about lunch, coffee, snacks, cooking, restaurants, what to eat later, or tastes/preferences grounded in the characters. No news topic unless unavoidable.",
+    "family_and_plans": "Use TiDB family/personal context to discuss family, partner, children, weekend plans, errands, celebrations, travel ideas, or future plans without inventing unsupported sensitive facts.",
+    "hobbies_and_memories": "Discuss hobbies, music, TV, sports, shopping, memories, habits, preferences, or something they would plausibly do after work. Keep it casual and specific.",
+    "coworker_social": "Talk about coworkers, office habits, light teasing, who is diligent/lazy, recent shared events in the town, or a harmless interpersonal observation. Do not recycle the last gossip topic.",
+    "everyday_chile": "Talk about wider everyday life in Chile or Latin America: prices, transport, weather changes, holidays, football, entertainment, routines, travel, or culture. This is broader than Iquique/ZOFRI and does not require a news headline.",
+    "current_news": "Discuss ONE supplied current headline or current public fact, preferably from a category not used recently. It may be Iquique, Chile, Latin America, or world news. Do not discuss more than one headline in this conversation and do not reuse a recently discussed headline.",
+}
 
 
 def _chat_tool():
@@ -58,6 +84,42 @@ def _pair_allowed(a, b):
     return bool(a and b and a != b and a in ids and b in ids)
 
 
+def _recent_dialogue_text(world, limit=6):
+    rows = world.get("recentDialogue") if isinstance(world, dict) else []
+    if not isinstance(rows, list):
+        return []
+    output = []
+    for chat in rows[-max(1, int(limit)):]:
+        if not isinstance(chat, dict):
+            continue
+        turns = chat.get("turns") if isinstance(chat.get("turns"), list) else []
+        text = " ".join(
+            str(turn.get("text") or turn.get("text_zh") or "").strip()
+            for turn in turns if isinstance(turn, dict)
+        ).strip()
+        if not text:
+            text = str(chat.get("text") or "").strip()
+        if text:
+            output.append(text[:700])
+    return output[-limit:]
+
+
+def _choose_topic_mode(pair_key):
+    global _TOPIC_CURSOR
+    with _TOPIC_LOCK:
+        previous = _PAIR_LAST_TOPIC.get(pair_key)
+        for _ in range(len(_TOPIC_MODES)):
+            mode = _TOPIC_MODES[_TOPIC_CURSOR % len(_TOPIC_MODES)]
+            _TOPIC_CURSOR += 1
+            if mode != previous:
+                _PAIR_LAST_TOPIC[pair_key] = mode
+                return mode
+        mode = _TOPIC_MODES[_TOPIC_CURSOR % len(_TOPIC_MODES)]
+        _TOPIC_CURSOR += 1
+        _PAIR_LAST_TOPIC[pair_key] = mode
+        return mode
+
+
 def install_auto_chat_runtime():
     global _INSTALLED
     if _INSTALLED:
@@ -84,24 +146,37 @@ def install_auto_chat_runtime():
         if not key:
             return jsonify({"ok": False, "error": "DEEPSEEK_API_KEY is not configured"}), 503
 
-        public_context = current_context(refresh_if_stale=True)
-        news = recent_news_for_ai(10)
+        # Do not block a conversation on public-data refresh; the background
+        # context daemon owns refresh. A stale snapshot is still better than a
+        # repeated/slow chat request.
+        public_context = current_context(refresh_if_stale=False)
         characters = character_context()
         world = _world_slice(body.get("world"))
+        recent_dialogue = _recent_dialogue_text(world, 6)
+        topic_mode = _choose_topic_mode(pair_key)
+        news = recent_news_for_ai(12) if topic_mode == "current_news" else []
         tool = _chat_tool()
         if not tool:
             return jsonify({"ok": False, "error": "agent_chat tool is unavailable"}), 500
 
-        system = f"""You write one believable conversation inside CUSTOMS AGENT TOWN in Iquique, Chile.
+        system = f"""You write one believable conversation inside CUSTOMS AGENT TOWN.
 The participants are exactly {a} and {b}; do not substitute another permanent character.
 Use the supplied TiDB character profiles, recent dialogue and world state so the conversation feels continuous.
 Produce 4 to 8 turns and alternate naturally between the two speakers.
 For EVERY turn, text must be natural everyday Chilean Spanish and text_zh must be a natural Traditional Chinese translation of the same line.
-Current public information is supplied separately from the language model and is authoritative only to the extent shown.
-You MAY discuss a current headline, Iquique/Tarapaca, Chile, port/ZOFRI/customs work or the current weather when it fits naturally.
-A headline is only a headline fact: never invent article details, quotes, numbers, causes or outcomes that are not supplied.
-Do not force current events into every chat. If nothing current fits, talk naturally about work, personal context or a recent shared event.
-Avoid repeating topics visible in recentDialogue.
+
+CURRENT TOPIC MODE: {topic_mode}
+{_TOPIC_GUIDANCE.get(topic_mode, '')}
+
+DIVERSITY RULES:
+- The last conversations are supplied under recent_dialogue_to_avoid. Do not repeat their main event, headline, joke, complaint, or distinctive nouns unless this is clearly an intentional continuation.
+- Do not make ZOFRI, customs, port incidents, fires, crime, inspections, or local headlines the default topic merely because the characters work in Iquique.
+- These people have lives beyond work. Prefer concrete everyday details and different subjects across conversations.
+- Iquique is their location, not the boundary of their interests. They may naturally talk about Chile, Latin America, world events, entertainment, sport, food, family, hobbies, prices, travel or personal plans when appropriate.
+- Current news is allowed ONLY when topic_mode is current_news. In all other modes, do not introduce a headline just because public context exists.
+- When topic_mode is current_news, discuss at most ONE supplied headline and never invent article details, quotes, numbers, causes or outcomes not supplied.
+- Keep personalities distinct. Let TiDB workStyle/personality/family notes shape how each person reacts instead of making everyone sound like the same news commentator.
+
 Use ONLY the agent_chat tool. Do not narrate outside the tool call."""
 
         payload = {
@@ -110,12 +185,13 @@ Use ONLY the agent_chat tool. Do not narrate outside the tool call."""
                 {"role": "system", "content": system},
                 {"role": "user", "content": json.dumps({
                     "participants": [a, b],
+                    "topic_mode": topic_mode,
                     "characters": characters,
+                    "recent_dialogue_to_avoid": recent_dialogue,
                     "current_public_context": {
                         "location": public_context.get("location"),
                         "fetched_at_ms": public_context.get("fetched_at_ms") or public_context.get("updated_at_ms"),
                         "weather": public_context.get("weather") or {},
-                        "sources": public_context.get("sources") or [],
                     },
                     "recent_news": news,
                     "world": world,
@@ -123,7 +199,7 @@ Use ONLY the agent_chat tool. Do not narrate outside the tool call."""
             ],
             "tools": [tool],
             "tool_choice": "required",
-            "temperature": 1.0,
+            "temperature": 1.12,
             "max_tokens": 1400,
         }
         try:
@@ -131,7 +207,7 @@ Use ONLY the agent_chat tool. Do not narrate outside the tool call."""
                 "https://api.deepseek.com/chat/completions",
                 headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
                 json=payload,
-                timeout=(4, 25),
+                timeout=(4, 22),
             )
             if not response.ok:
                 raise RuntimeError(f"DeepSeek HTTP {response.status_code}: {response.text[:180]}")
@@ -149,7 +225,13 @@ Use ONLY the agent_chat tool. Do not narrate outside the tool call."""
             actions = _base._validate_actions(candidate)
             if not actions:
                 raise RuntimeError("DeepSeek returned no valid conversation")
-            return jsonify({"ok": True, "actions": actions, "source": "deepseek", "news_count": len(news)})
+            return jsonify({
+                "ok": True,
+                "actions": actions,
+                "source": "deepseek",
+                "topic_mode": topic_mode,
+                "news_count": len(news),
+            })
         except requests.Timeout:
             return jsonify({"ok": False, "error": "DeepSeek request timed out"}), 504
         except Exception as exc:
