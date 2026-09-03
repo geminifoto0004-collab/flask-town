@@ -45,6 +45,7 @@ from blueprints.town_character_tidb_runtime import (
     run_sql_migration_file,
 )
 from blueprints.town_character_validation_patch import install_character_validation_patch
+from blueprints.town_roster_integrity_runtime import install_roster_integrity_runtime
 
 # Import side effect: allow longer composed tool-call sequences before admin and
 # language runtimes bind the action parser.
@@ -64,6 +65,7 @@ from blueprints.town_state_merge_runtime import install_state_merge_guard
 
 from blueprints import town_page_bp as _town_page_module
 from blueprints.town_latest_page_runtime import latest_town_html
+from blueprints.town_render_roster_unification_patch import patch_render_roster_unification
 from blueprints.town_render_visibility_patch import patch_render_visibility
 from blueprints.town_render_action_patch import patch_render_actions
 from blueprints.town_render_depth_patch import patch_render_depth
@@ -135,6 +137,9 @@ if not character_ids(force=True):
         os.path.join(os.path.dirname(__file__), "migrations", "20260831_town_characters.sql")
     )
 install_character_runtime()
+# Final integrity guard: an older three-slot runtime may no longer erase the
+# runtime state of the 4th+ TiDB colleague.
+install_roster_integrity_runtime()
 
 install_admin_scene_runtime()
 install_officer_scene_admin_patch()
@@ -162,11 +167,12 @@ town_ai_bp = _town_ai_module.town_ai_bp
 def _build_cached_town_html():
     """Compose the browser build once per Render worker, not once per request.
 
-    Keep the original mature pixel-character renderer/movement loop. Character
-    identity is rebound to the current TiDB core characters once during worker
-    startup, so there is no second overlay renderer and no delayed visual swap.
+    Keep the original mature pixel-character renderer/movement loop. TiDB owns
+    the permanent roster, so historical three-agent participant caps are removed
+    from the original HTML before any later visual patches are injected.
     """
     html = latest_town_html()
+    html = patch_render_roster_unification(html)
     html = patch_render_visibility(html)
     html = patch_render_actions(html)
     html = patch_render_depth(html)
@@ -233,6 +239,8 @@ def town_health():
             "admin_deepseek_read_timeout_seconds": 12,
             "semantic_entity_compat": True,
             "world_scene_runtime": True,
+            "roster_integrity_runtime": True,
+            "native_roster_unification": True,
             "state_merge_guard": bool(_STATE_MERGE_GUARD),
             "native_character_renderer": True,
         }
