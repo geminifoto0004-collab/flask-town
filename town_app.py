@@ -72,6 +72,7 @@ from blueprints.town_render_dialogue_panel_patch import patch_render_dialogue_pa
 from blueprints.town_render_dialogue_fix_patch import patch_render_dialogue_fix
 from blueprints.town_render_panel_alignment_patch import patch_render_panel_alignment
 from blueprints.town_render_shared_dialogue_patch import patch_render_shared_dialogue
+from blueprints.town_render_dialogue_sync_patch import patch_render_dialogue_sync
 from blueprints.town_render_admin_world_patch import patch_render_admin_world
 from blueprints.town_render_world_object_patch import patch_render_world_objects
 from blueprints.town_render_generic_entity_patch import patch_render_generic_entities
@@ -154,6 +155,10 @@ def _build_cached_town_html():
     html = patch_render_dialogue_fix(html)
     html = patch_render_panel_alignment(html)
     html = patch_render_shared_dialogue(html)
+    # Final dialogue owner: native agent.chatText controls live turn timing;
+    # TiDB is completed/shared history only. The same layer owns sidebar scroll
+    # following so no second scroll-lock runtime fights the user's input.
+    html = patch_render_dialogue_sync(html)
     html = patch_render_admin_world(html)
     html = patch_render_world_objects(html)
     html = patch_render_generic_entities(html)
@@ -200,6 +205,8 @@ def town_health():
             "local_life_tick": True,
             "auto_chat_runtime": True,
             "cron_tick_runtime": True,
+            "dialogue_native_sync": True,
+            "dialogue_single_scroll_owner": True,
             "admin_reliability_guard": True,
             "admin_core_fallback": True,
             "admin_fast_path": True,
