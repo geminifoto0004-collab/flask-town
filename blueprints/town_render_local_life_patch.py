@@ -13,9 +13,6 @@ from .town_render_performance_patch import patch_render_performance
 
 
 def patch_render_local_life(html: str) -> str:
-    # First extend the original in-page `agents` array from TiDB. New permanent
-    # colleagues then use the SAME native renderer, movement, chat and depth
-    # engine as the first three employees. No second colleague canvas.
     html = patch_render_native_colleagues(html)
 
     marker = "  function sync(){"
@@ -40,27 +37,9 @@ def patch_render_local_life(html: str) -> str:
 
   function fallbackChat(pair){
     if(!pair||typeof applyAiTownActions!=='function')return false;
-    const lines=[
-      [
-        ['¿Cómo va todo?','最近怎麼樣？'],
-        ['Bien, aquí seguimos con lo nuestro.','還好，就繼續忙自己的事情。'],
-        ['Después conversamos con más calma.','等一下有空再慢慢聊。'],
-        ['Ya, dale.','好啊。']
-      ],
-      [
-        ['¿Vas por un café después?','等一下要去喝咖啡嗎？'],
-        ['Puede ser, cuando termine esto.','可以啊，等我把這個弄完。'],
-        ['Me avisas entonces.','那你等一下叫我。'],
-        ['Sí.','好。']
-      ]
-    ];
+    const lines=[[['¿Cómo va todo?','最近怎麼樣？'],['Bien, aquí seguimos con lo nuestro.','還好，就繼續忙自己的事情。'],['Después conversamos con más calma.','等一下有空再慢慢聊。'],['Ya, dale.','好啊。']],[['¿Vas por un café después?','等一下要去喝咖啡嗎？'],['Puede ser, cuando termine esto.','可以啊，等我把這個弄完。'],['Me avisas entonces.','那你等一下叫我。'],['Sí.','好。']]];
     const p=lines[Math.floor(Math.random()*lines.length)];
-    applyAiTownActions([{type:'agent_chat',from:String(pair.a.name),to:String(pair.b.name),turns:[
-      {speaker:String(pair.a.name),text:p[0][0],text_zh:p[0][1]},
-      {speaker:String(pair.b.name),text:p[1][0],text_zh:p[1][1]},
-      {speaker:String(pair.a.name),text:p[2][0],text_zh:p[2][1]},
-      {speaker:String(pair.b.name),text:p[3][0],text_zh:p[3][1]}
-    ],localFallback:true}]);
+    applyAiTownActions([{type:'agent_chat',from:String(pair.a.name),to:String(pair.b.name),turns:[{speaker:String(pair.a.name),text:p[0][0],text_zh:p[0][1]},{speaker:String(pair.b.name),text:p[1][0],text_zh:p[1][1]},{speaker:String(pair.a.name),text:p[2][0],text_zh:p[2][1]},{speaker:String(pair.b.name),text:p[3][0],text_zh:p[3][1]}],localFallback:true}]);
     return true;
   }
 
@@ -77,34 +56,19 @@ def patch_render_local_life(html: str) -> str:
     aiChatBusy=true;
     try{
       const world=(typeof compactTownSnapshot==='function')?compactTownSnapshot():{agents:live.map(a=>({name:a.name,displayName:a.displayName,state:a.state,profile:a.profile||{}})),recentDialogue:(Array.isArray(window.__townDialogueHistory)?window.__townDialogueHistory:[]).slice(-8)};
-      const r=await fetch('/api/town/auto-chat',{
-        method:'POST',
-        headers:{'Content-Type':'application/json','Accept':'application/json'},
-        body:JSON.stringify({from:String(pair.a.name),to:String(pair.b.name),world})
-      });
+      const r=await fetch('/api/town/auto-chat',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify({from:String(pair.a.name),to:String(pair.b.name),world})});
       const data=await r.json().catch(()=>({}));
       if(!r.ok||!data.ok||!Array.isArray(data.actions)||!data.actions.length)throw new Error(data.error||'AI chat unavailable');
       applyAiTownActions(data.actions);
-    }catch(_e){
-      fallbackChat(pair);
-    }finally{
-      aiChatBusy=false;
-    }
+    }catch(_e){fallbackChat(pair);}finally{aiChatBusy=false;}
   }
 
   function townLocalLifeTick(){
     if(typeof applyAiTownActions!=='function')return;
     const live=currentLiveAgents();if(!live.length)return;
     const actor=live[Math.floor(Math.random()*live.length)];
-    const roll=Math.random();
-    let action='wander';
-    if(roll<.20)action='desk';
-    else if(roll<.36)action='files';
-    else if(roll<.49)action='coffee';
-    else if(roll<.60)action='lookSea';
-    else if(roll<.69)action='plant';
-    else if(roll<.77)action='stretch';
-    else if(roll<.88&&live.length>1)action='checkCoworker';
+    const roll=Math.random();let action='wander';
+    if(roll<.20)action='desk';else if(roll<.36)action='files';else if(roll<.49)action='coffee';else if(roll<.60)action='lookSea';else if(roll<.69)action='plant';else if(roll<.77)action='stretch';else if(roll<.88&&live.length>1)action='checkCoworker';
     applyAiTownActions([{type:'agent_action',agent:String(actor.name),action}]);
   }
 
@@ -113,17 +77,21 @@ def patch_render_local_life(html: str) -> str:
 
     html = html.replace(
         "    updateDogs(dt);",
-        "    updateDogs(dt);\n"
-        "    localLifeTimer-=dt;if(localLifeTimer<=0){localLifeTimer=rand(16,34);townLocalLifeTick();}\n"
-        "    aiChatTimer-=dt;if(aiChatTimer<=0){aiChatTimer=rand(90,180);townAiChatTick();}",
+        "    updateDogs(dt);\n    localLifeTimer-=dt;if(localLifeTimer<=0){localLifeTimer=rand(16,34);townLocalLifeTick();}\n    aiChatTimer-=dt;if(aiChatTimer<=0){aiChatTimer=rand(90,180);townAiChatTick();}",
         1,
     )
-
     html = html.replace("let aiAutoTimer=rand(35,75);", "let aiAutoTimer=rand(420,900);")
     html = html.replace("aiAutoTimer=rand(300,900);testDeepSeek();", "aiAutoTimer=rand(900,1800);testDeepSeek();")
     html = html.replace("aiAutoTimer=aiAuto?rand(15,35):999999;", "aiAutoTimer=aiAuto?rand(300,600):999999;")
     html = html.replace("if(aiAuto)aiAutoTimer=rand(8,22);", "if(aiAuto)aiAutoTimer=rand(300,600);")
 
-    # Admin command responses already contain the authoritative evolved world.
+    # The admin overlay is async. Before dispatching agent_* actions, ensure a
+    # just-added TiDB colleague has already been inserted into native `agents`.
+    html = html.replace(
+        "if(typeof window.__townApplyAiTownActions==='function')window.__townApplyAiTownActions(actions);",
+        "if(typeof window.__townRefreshNativeColleagues==='function')await window.__townRefreshNativeColleagues();\n          if(typeof window.__townApplyAiTownActions==='function')window.__townApplyAiTownActions(actions);",
+        1,
+    )
+
     html = patch_render_admin_entity_sync(html)
     return patch_render_performance(html)
