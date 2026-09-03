@@ -20,6 +20,7 @@ from flask import jsonify, request
 
 from . import town_ai_bp as _base
 from .town_admin_spawn_persistence_guard import install_admin_spawn_persistence_guard
+from .town_colleague_world_projection import install_colleague_world_projection
 from .town_world_lock_runtime import WORLD_LOCK, install_world_lock_runtime
 
 
@@ -41,6 +42,11 @@ def install_state_merge_guard(app):
     # lock wraps the authoritative storage functions rather than startup-local
     # JSON helpers.
     install_world_lock_runtime()
+
+    # Every /api/town/world response projects TiDB colleagues after the three
+    # native sprite slots into the generic renderer payload. This is presentation
+    # only and never writes the synthetic entities back into TiDB world state.
+    install_colleague_world_projection(app)
 
     endpoint = "town_ai.save_state"
     previous = app.view_functions.get(endpoint)
@@ -90,7 +96,7 @@ def install_state_merge_guard(app):
     guarded_save_state._town_state_merge_guard = True
     app.view_functions[endpoint] = guarded_save_state
 
-    # The admin route is registered on the same blueprint.  Verify every
+    # The admin route is registered on the same blueprint. Verify every
     # successful spawn against an authoritative TiDB readback before returning
     # it to the browser.
     install_admin_spawn_persistence_guard(app)
