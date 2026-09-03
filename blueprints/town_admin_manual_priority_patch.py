@@ -1,11 +1,9 @@
 """Manual admin colleague actions have higher priority than automatic life/shift rules.
 
-This layer is generic and TiDB-driven. It does not hard-code character names. If
-a manual admin plan physically involves a permanent colleague, the server first
-summons that colleague unless the same plan explicitly sends them off duty. A
-natural-language request that explicitly recalls/allows all colleagues is also
-expanded against the current TiDB roster so a model cannot silently omit a newly
-added colleague. Dynamic colleagues are mirrored into visible generic actions.
+All permanent colleagues now live in the SAME native browser `agents` engine.
+This server layer therefore only guarantees TiDB-driven recall/presence. It does
+not mirror employees into genericEntities; generic entities are reserved for
+visitors, celebrities, creatures, vehicles and other story actors.
 """
 
 from __future__ import annotations
@@ -51,12 +49,7 @@ def _participants(actions):
 
 
 def _requests_all_colleagues_back(prompt):
-    """Recognize only a generic personnel-group recall/chat instruction.
-
-    This is language plumbing, not story logic. Character identities still come
-    exclusively from TiDB. The narrow action markers avoid turning a request like
-    'all colleagues go home' into a recall.
-    """
+    """Expand only a generic whole-personnel recall/chat request against TiDB."""
     text = str(prompt or "").strip().lower()
     if not text:
         return False
@@ -73,76 +66,6 @@ def _requests_all_colleagues_back(prompt):
     return any(group in text for group in groups) and any(action in text for action in recall)
 
 
-def _extra_generic_actions(actions, rows, extra_ids, forced_ids=None):
-    by_id = {str(row.get("id") or "").upper(): row for row in rows if isinstance(row, dict)}
-    extras = []
-
-    # Make every physically used dynamic colleague a visible persistent generic
-    # representation. Repeated spawn_entity calls are harmless: the generic
-    # persistence layer keeps the already-existing entity and applies new steps.
-    used, explicit_off, _explicit_on = _participants(actions)
-    used.update({_agent(v) for v in (forced_ids or []) if _agent(v)})
-    ordered_used = [str(row.get("id") or "").upper() for row in rows if str(row.get("id") or "").upper() in used]
-    for index, colleague_id in enumerate([v for v in ordered_used if v in extra_ids and v not in explicit_off]):
-        row = by_id.get(colleague_id) or {}
-        col = index % 4
-        line = index // 4
-        extras.append({
-            "type": "spawn_entity",
-            "id": colleague_id,
-            "name": str(row.get("name") or colleague_id)[:28],
-            "entityType": "human",
-            "zone": "office",
-            "x": 135 + col * 115,
-            "y": 220 + line * 42,
-            "bodyColor": "#536f86",
-            "accentColor": "#d4a74a",
-            "carrying": [],
-        })
-
-    for action in actions or []:
-        if not isinstance(action, dict):
-            continue
-        kind = str(action.get("type") or "")
-        if kind == "agent_shift":
-            colleague_id = _agent(action.get("agent"))
-            mode = str(action.get("mode") or action.get("shift") or "").lower()
-            if colleague_id in extra_ids and mode == "off":
-                extras.append({"type": "remove_entity", "entity": colleague_id})
-        elif kind == "agent_say":
-            colleague_id = _agent(action.get("agent"))
-            if colleague_id in extra_ids:
-                extras.append({
-                    "type": "say",
-                    "entity": colleague_id,
-                    "text": str(action.get("text") or "")[:160],
-                    "text_zh": str(action.get("text_zh") or action.get("textZh") or "")[:160],
-                })
-        elif kind == "agent_chat":
-            a = _agent(action.get("from") or action.get("agent"))
-            b = _agent(action.get("to") or action.get("target"))
-            if a in extra_ids and b:
-                extras.append({"type": "move_entity", "entity": a, "target": b, "speed": 38})
-            if b in extra_ids and a:
-                extras.append({"type": "move_entity", "entity": b, "target": a, "speed": 38})
-            for turn in action.get("turns") if isinstance(action.get("turns"), list) else []:
-                if not isinstance(turn, dict):
-                    continue
-                speaker = _agent(turn.get("speaker") or turn.get("from"))
-                if speaker not in extra_ids:
-                    continue
-                text = str(turn.get("text") or turn.get("message") or "").strip()[:160]
-                if not text:
-                    continue
-                extras.append({
-                    "type": "say",
-                    "entity": speaker,
-                    "text": text,
-                    "text_zh": str(turn.get("text_zh") or turn.get("textZh") or "")[:160],
-                })
-    return extras
-
-
 def install_admin_manual_priority_patch():
     previous = _admin._admin_model_command
     if getattr(previous, "_town_admin_manual_priority", False):
@@ -157,40 +80,31 @@ def install_admin_manual_priority_patch():
         rows = character_context(force=True)
         ids = [str(row.get("id") or "").upper() for row in rows if isinstance(row, dict) and row.get("id")]
         id_set = set(ids)
-        native_ids = set(ids[:3])
-        extra_ids = id_set - native_ids
 
         actions = [dict(a) for a in (result.get("actions") or []) if isinstance(a, dict)]
         used, explicit_off, explicit_on = _participants(actions)
         used &= id_set
 
-        # "all colleagues come back/chat" is a binding personnel-group request.
-        # Expand it against the current TiDB roster so newly-added characters are
-        # not omitted just because the model happened to name only older staff.
         force_all = _requests_all_colleagues_back(prompt)
         if force_all:
             used.update(id_set)
 
-        # Any physical manual action means the administrator wants that colleague
-        # present now. Automatic night/day rules cannot veto it. An explicit OFF
-        # action in the same plan remains authoritative.
+        # A manual physical action means that employee must be present now.
+        # Night/day automation cannot veto it. Explicit OFF in the same plan wins.
         summon = [person for person in ids if person in used and person not in explicit_off]
         prefix = []
         for person in summon:
             if person not in explicit_on:
                 prefix.append({"type": "agent_shift", "agent": person, "mode": "on"})
 
-        # Dynamic colleagues do not live in the three historical browser slots;
-        # mirror their manual speech/chat into the generic entity engine.
-        mirror = _extra_generic_actions(actions, rows, extra_ids, forced_ids=summon if force_all else None)
-
-        synthetic = _base._validate_actions(prefix + mirror)
-        prefix_count = min(len(prefix), len(synthetic))
-        result["actions"] = synthetic[:prefix_count] + actions + synthetic[prefix_count:]
+        # Only validate presence actions here. Employee movement/speech/chat stays
+        # as agent_* actions and is executed by the shared native browser engine.
+        presence_actions = _base._validate_actions(prefix)
+        result["actions"] = presence_actions + actions
         result["admin_manual_priority"] = True
         result["admin_force_all_colleagues"] = force_all
         result["admin_summoned_colleagues"] = summon
-        result["admin_dynamic_colleagues"] = [v for v in summon if v in extra_ids]
+        result["admin_dynamic_colleagues"] = [v for v in summon if v not in set(ids[:3])]
         return result
 
     prioritized_admin_model_command._town_admin_manual_priority = True
