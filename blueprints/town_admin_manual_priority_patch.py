@@ -1,11 +1,11 @@
 """Manual admin colleague actions have higher priority than automatic life/shift rules.
 
-This layer is generic and TiDB-driven. It does not inspect story keywords or
-hard-code character names. If a manual admin plan physically involves a
-permanent colleague, the server first summons that colleague unless the same
-plan explicitly sends them off duty. For colleagues beyond the three historical
-native sprite slots, the same admin plan is mirrored into generic-entity actions
-so the browser has a visible actor and can render their speech/chat.
+This layer is generic and TiDB-driven. It does not hard-code character names. If
+a manual admin plan physically involves a permanent colleague, the server first
+summons that colleague unless the same plan explicitly sends them off duty. A
+natural-language request that explicitly recalls/allows all colleagues is also
+expanded against the current TiDB roster so a model cannot silently omit a newly
+added colleague. Dynamic colleagues are mirrored into visible generic actions.
 """
 
 from __future__ import annotations
@@ -50,7 +50,30 @@ def _participants(actions):
     return people, explicit_off, explicit_on
 
 
-def _extra_generic_actions(actions, rows, extra_ids):
+def _requests_all_colleagues_back(prompt):
+    """Recognize only a generic personnel-group recall/chat instruction.
+
+    This is language plumbing, not story logic. Character identities still come
+    exclusively from TiDB. The narrow action markers avoid turning a request like
+    'all colleagues go home' into a recall.
+    """
+    text = str(prompt or "").strip().lower()
+    if not text:
+        return False
+    groups = (
+        "所有同事", "全部同事", "同事都", "全體同事", "全体同事",
+        "all colleagues", "all coworkers", "everyone at work",
+        "todos los colegas", "todos los compañeros", "todo el personal",
+    )
+    recall = (
+        "叫回來", "叫回来", "回來", "回来", "召回", "回辦公室", "回办公室", "聊天", "對話", "对话",
+        "come back", "return", "recall", "chat", "talk",
+        "volver", "vuelvan", "regresar", "regresen", "conversar", "charlar",
+    )
+    return any(group in text for group in groups) and any(action in text for action in recall)
+
+
+def _extra_generic_actions(actions, rows, extra_ids, forced_ids=None):
     by_id = {str(row.get("id") or "").upper(): row for row in rows if isinstance(row, dict)}
     extras = []
 
@@ -58,7 +81,9 @@ def _extra_generic_actions(actions, rows, extra_ids):
     # representation. Repeated spawn_entity calls are harmless: the generic
     # persistence layer keeps the already-existing entity and applies new steps.
     used, explicit_off, _explicit_on = _participants(actions)
-    for index, colleague_id in enumerate([v for v in used if v in extra_ids and v not in explicit_off]):
+    used.update({_agent(v) for v in (forced_ids or []) if _agent(v)})
+    ordered_used = [str(row.get("id") or "").upper() for row in rows if str(row.get("id") or "").upper() in used]
+    for index, colleague_id in enumerate([v for v in ordered_used if v in extra_ids and v not in explicit_off]):
         row = by_id.get(colleague_id) or {}
         col = index % 4
         line = index // 4
@@ -139,6 +164,13 @@ def install_admin_manual_priority_patch():
         used, explicit_off, explicit_on = _participants(actions)
         used &= id_set
 
+        # "all colleagues come back/chat" is a binding personnel-group request.
+        # Expand it against the current TiDB roster so newly-added characters are
+        # not omitted just because the model happened to name only older staff.
+        force_all = _requests_all_colleagues_back(prompt)
+        if force_all:
+            used.update(id_set)
+
         # Any physical manual action means the administrator wants that colleague
         # present now. Automatic night/day rules cannot veto it. An explicit OFF
         # action in the same plan remains authoritative.
@@ -150,11 +182,13 @@ def install_admin_manual_priority_patch():
 
         # Dynamic colleagues do not live in the three historical browser slots;
         # mirror their manual speech/chat into the generic entity engine.
-        mirror = _extra_generic_actions(actions, rows, extra_ids)
+        mirror = _extra_generic_actions(actions, rows, extra_ids, forced_ids=summon if force_all else None)
 
         synthetic = _base._validate_actions(prefix + mirror)
-        result["actions"] = synthetic[: len(prefix)] + actions + synthetic[len(prefix):]
+        prefix_count = min(len(prefix), len(synthetic))
+        result["actions"] = synthetic[:prefix_count] + actions + synthetic[prefix_count:]
         result["admin_manual_priority"] = True
+        result["admin_force_all_colleagues"] = force_all
         result["admin_summoned_colleagues"] = summon
         result["admin_dynamic_colleagues"] = [v for v in summon if v in extra_ids]
         return result
