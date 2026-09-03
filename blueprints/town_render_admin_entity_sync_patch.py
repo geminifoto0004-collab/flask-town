@@ -3,10 +3,12 @@
 The generic overlay normally hydrates from /api/town/world polling. Admin
 commands already return the authoritative evolved world in their JSON payload,
 so expose the overlay's existing mergeWorld function and feed that response into
-it immediately. The final dialogue patch is applied here because this function
-runs after the dialogue panel/shared-history patches in the browser build.
+it immediately. The final dialogue patches are applied here because this
+function runs after the dialogue panel/shared-history patches in the browser
+build.
 """
 
+from .town_render_dialogue_scroll_lock_patch import patch_render_dialogue_scroll_lock
 from .town_render_dialogue_sync_patch import patch_render_dialogue_sync
 
 
@@ -40,6 +42,7 @@ def patch_render_admin_entity_sync(html: str) -> str:
         tag = '\n<script id="town-admin-entity-sync-runtime">window.TOWN_ADMIN_ENTITY_SYNC=true;</script>\n'
         html = html.replace('</body>', tag + '</body>', 1) if '</body>' in html else html + tag
 
-    # This must run after town_render_dialogue_panel_patch and
+    # These must run after town_render_dialogue_panel_patch and
     # town_render_shared_dialogue_patch have injected their known markup/runtime.
-    return patch_render_dialogue_sync(html)
+    html = patch_render_dialogue_sync(html)
+    return patch_render_dialogue_scroll_lock(html)
