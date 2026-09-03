@@ -1,11 +1,48 @@
 """Extend the mature native browser agent engine with every TiDB colleague.
 
 There must be one employee rendering/movement/chat method, not a separate
-canvas for the 4th+ colleague. This patch injects TiDB roster synchronization
-inside the original town script closure where `agents` already exists. New
-employees clone a same-gender native agent template, then participate in the
-same draw/update/path/chat/local-life loops as the first three employees.
+canvas for the 4th+ colleague. The authoritative TiDB roster is embedded into
+the generated HTML so all permanent colleagues exist in the native `agents`
+array before the first game frame. Background fetches then reconcile later
+TiDB changes without a visible three-then-five pop-in.
 """
+
+import json
+
+from .town_character_tidb_runtime import character_context
+
+
+def _bootstrap_rows():
+    try:
+        rows = character_context(force=True)
+    except Exception:
+        rows = []
+    result = []
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict) or not row.get("id"):
+            continue
+        result.append({
+            "id": str(row.get("id") or "").upper(),
+            "name": str(row.get("name") or row.get("id") or ""),
+            "gender": str(row.get("gender") or ""),
+            "birthYear": row.get("birthYear"),
+            "careerState": str(row.get("careerState") or "active"),
+            "workStyle": str(row.get("workStyle") or ""),
+            "displayOrder": row.get("displayOrder", 0),
+            "profile": {
+                "gender": str(row.get("gender") or ""),
+                "birthYear": row.get("birthYear"),
+                "maritalStatus": str(row.get("maritalStatus") or ""),
+                "partnerLabel": str(row.get("partnerLabel") or ""),
+                "childrenCount": row.get("childrenCount", 0),
+                "careerState": str(row.get("careerState") or "active"),
+                "workStyle": str(row.get("workStyle") or ""),
+                "personalityNotes": str(row.get("personalityNotes") or ""),
+                "familyNotes": str(row.get("familyNotes") or ""),
+                "traits": dict(row.get("traits") or {}) if isinstance(row.get("traits"), dict) else {},
+            },
+        })
+    return result
 
 
 def patch_render_native_colleagues(html: str) -> str:
@@ -16,7 +53,10 @@ def patch_render_native_colleagues(html: str) -> str:
     if marker not in html:
         return html
 
-    runtime = r'''  let townTiDBRosterRows=[];
+    bootstrap_json = json.dumps(_bootstrap_rows(), ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
+
+    runtime = r'''  const townTiDBBootstrapRows=__TOWN_BOOTSTRAP_ROWS__;
+  let townTiDBRosterRows=Array.isArray(townTiDBBootstrapRows)?townTiDBBootstrapRows:[];
   let townTiDBRosterBusy=false;
   let townTiDBRosterKey='';
   const townTiDBDynamicIds=new Set();
@@ -57,6 +97,56 @@ def patch_render_native_colleagues(html: str) -> str:
     return clone;
   }
 
+  function townMergeTiDBRowsIntoNativeAgents(rows,world,logRoster=false){
+    rows=Array.isArray(rows)?rows:[];
+    if(!rows.length)return false;
+    townTiDBRosterRows=rows;
+    const validIds=new Set(rows.map(r=>String(r&&r.id||'').toUpperCase()).filter(Boolean));
+    const presence=world&&world.characterPresence&&typeof world.characterPresence==='object'?world.characterPresence:{};
+
+    rows.forEach((row,rowIndex)=>{
+      const id=String(row&&row.id||'').trim().toUpperCase();if(!id)return;
+      let agent=agents.find(a=>townAgentId(a)===id);
+      if(!agent&&rowIndex>=3){agent=townCloneAgentTemplate(row,rowIndex,rows,world);if(agent){agents.push(agent);townTiDBDynamicIds.add(id);}}
+      if(!agent)return;
+      agent.name=id;agent.slot=id;agent.displayName=String(row.name||id);agent.tidbGender=String(row.gender||'');
+      agent.profile={...(agent.profile||{}),...(row.profile||{}),gender:String(row.gender||'')};
+      agent.careerState=String(row.careerState||row.profile&&row.profile.careerState||agent.careerState||'active');
+      agent.workStyle=String(row.workStyle||row.profile&&row.profile.workStyle||agent.workStyle||'');
+      const pr=presence[id];
+      if(pr&&typeof pr==='object'){
+        if(typeof pr.manualOffDuty==='boolean')agent.manualOffDuty=pr.manualOffDuty;
+        if(pr.dutyState==='on'||pr.dutyState==='off')agent.dutyState=pr.dutyState;
+      }
+    });
+
+    for(let i=agents.length-1;i>=3;i--){
+      const a=agents[i],id=townAgentId(a);
+      if(a&&a.tidbDynamicColleague&&!validIds.has(id)){agents.splice(i,1);townTiDBDynamicIds.delete(id);}
+    }
+    agents.forEach((a,i)=>{if(a)a.index=i;});
+
+    const rosterIds=rows.map(r=>String(r&&r.id||'').toUpperCase()).filter(Boolean);
+    const nativeIds=agents.map(townAgentId).filter(Boolean);
+    const key=rosterIds.join(',')+'|'+nativeIds.join(',');
+    if(logRoster&&key!==townTiDBRosterKey){
+      townTiDBRosterKey=key;
+      if(typeof addLog==='function'){
+        addLog('正式同事(TiDB)：'+rosterIds.join(','));
+        addLog('native agents：'+nativeIds.join(','));
+      }
+    }else if(!townTiDBRosterKey){
+      townTiDBRosterKey=key;
+    }
+    window.__townTiDBNativeAgentIds=()=>agents.map(townAgentId).filter(Boolean);
+    window.__townTiDBDynamicAgentIds=()=>agents.filter(a=>a&&a.tidbDynamicColleague).map(townAgentId);
+    return true;
+  }
+
+  // IMPORTANT: hydrate from the TiDB roster embedded by Flask synchronously,
+  // before sync()/animation can paint the historical three native slots alone.
+  townMergeTiDBRowsIntoNativeAgents(townTiDBBootstrapRows,{},false);
+
   async function townRefreshTiDBNativeColleagues(){
     if(townTiDBRosterBusy)return false;
     townTiDBRosterBusy=true;
@@ -69,52 +159,15 @@ def patch_render_native_colleagues(html: str) -> str:
       const roster=await rr.json();const worldData=await rw.json();
       const world=worldData&&worldData.world&&typeof worldData.world==='object'?worldData.world:{};
       const rows=Array.isArray(roster&&roster.characters)?roster.characters:[];
-      if(!rows.length)return false;
-      townTiDBRosterRows=rows;
-      const validIds=new Set(rows.map(r=>String(r&&r.id||'').toUpperCase()).filter(Boolean));
-      const presence=world&&world.characterPresence&&typeof world.characterPresence==='object'?world.characterPresence:{};
-
-      rows.forEach((row,rowIndex)=>{
-        const id=String(row&&row.id||'').trim().toUpperCase();if(!id)return;
-        let agent=agents.find(a=>townAgentId(a)===id);
-        if(!agent&&rowIndex>=3){agent=townCloneAgentTemplate(row,rowIndex,rows,world);if(agent){agents.push(agent);townTiDBDynamicIds.add(id);}}
-        if(!agent)return;
-        agent.name=id;agent.slot=id;agent.displayName=String(row.name||id);agent.tidbGender=String(row.gender||'');
-        agent.profile={...(agent.profile||{}),...(row.profile||{}),gender:String(row.gender||'')};
-        agent.careerState=String(row.careerState||row.profile&&row.profile.careerState||agent.careerState||'active');
-        agent.workStyle=String(row.workStyle||row.profile&&row.profile.workStyle||agent.workStyle||'');
-        const pr=presence[id];
-        if(pr&&typeof pr==='object'){
-          if(typeof pr.manualOffDuty==='boolean')agent.manualOffDuty=pr.manualOffDuty;
-          if(pr.dutyState==='on'||pr.dutyState==='off')agent.dutyState=pr.dutyState;
-        }
-      });
-
-      for(let i=agents.length-1;i>=3;i--){
-        const a=agents[i],id=townAgentId(a);
-        if(a&&a.tidbDynamicColleague&&!validIds.has(id)){agents.splice(i,1);townTiDBDynamicIds.delete(id);}
-      }
-      agents.forEach((a,i)=>{if(a)a.index=i;});
-
-      const rosterIds=rows.map(r=>String(r&&r.id||'').toUpperCase()).filter(Boolean);
-      const nativeIds=agents.map(townAgentId).filter(Boolean);
-      const key=rosterIds.join(',')+'|'+nativeIds.join(',');
-      if(key!==townTiDBRosterKey){
-        townTiDBRosterKey=key;
-        if(typeof addLog==='function'){
-          addLog('正式同事(TiDB)：'+rosterIds.join(','));
-          addLog('native agents：'+nativeIds.join(','));
-        }
-      }
-      window.__townTiDBNativeAgentIds=()=>agents.map(townAgentId).filter(Boolean);
-      window.__townTiDBDynamicAgentIds=()=>agents.filter(a=>a&&a.tidbDynamicColleague).map(townAgentId);
-      return true;
+      return townMergeTiDBRowsIntoNativeAgents(rows,world,true);
     }catch(_e){return false;}finally{townTiDBRosterBusy=false;}
   }
 
   window.__townRefreshNativeColleagues=townRefreshTiDBNativeColleagues;
-  setTimeout(townRefreshTiDBNativeColleagues,450);
+  // Reconcile presence/current TiDB edits shortly after load, but first-frame
+  // colleague creation has already happened synchronously above.
+  setTimeout(townRefreshTiDBNativeColleagues,120);
   setInterval(townRefreshTiDBNativeColleagues,4000);
 
-'''
+'''.replace('__TOWN_BOOTSTRAP_ROWS__', bootstrap_json)
     return html.replace(marker, runtime + marker, 1)
