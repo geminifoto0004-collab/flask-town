@@ -1,13 +1,9 @@
 """Protect server/TiDB-owned world fields from stale browser state snapshots.
 
 The native browser periodically POSTs /api/town/state. That snapshot predates
-several newer AI-world fields, so replacing the whole world with it can erase a
-freshly spawned generic entity before the overlay's next /world poll.
-
-This guard keeps browser-owned native state writable while preserving fields
-whose source of truth is the server/TiDB AI runtime. The whole read/merge/write
-section is serialized with the same process lock used by all TOWN world IO so a
-concurrent browser save cannot race a fresh AI spawn.
+several newer AI-world fields, so replacing the whole world with it can erase
+fresh server state. Browser-owned native state remains writable while newer
+server/TiDB fields are preserved atomically.
 """
 
 from __future__ import annotations
@@ -21,7 +17,7 @@ from flask import jsonify, request
 from . import town_ai_bp as _base
 from .town_admin_manual_priority_patch import install_admin_manual_priority_patch
 from .town_admin_spawn_persistence_guard import install_admin_spawn_persistence_guard
-from .town_colleague_world_projection import install_colleague_world_projection
+from .town_character_presence_runtime import install_character_presence_runtime
 from .town_world_lock_runtime import WORLD_LOCK, install_world_lock_runtime
 
 
@@ -35,24 +31,24 @@ _SERVER_OWNED_FIELDS = (
     "recentDialogue",
     "recentDirectorActions",
     "characterProfiles",
+    "characterPresence",
 )
 
 
 def install_state_merge_guard(app):
     # Install only after TiDB runtime and all world wrappers are bound, so the
-    # lock wraps the authoritative storage functions rather than startup-local
-    # JSON helpers.
+    # lock wraps authoritative storage rather than startup-local JSON helpers.
     install_world_lock_runtime()
 
-    # This is installed after the admin fast/reliability director stack. Manual
-    # admin actions involving permanent colleagues therefore override automatic
-    # night/day presence rules and dynamic colleagues get generic visual actions.
-    install_admin_manual_priority_patch()
+    # Presence is stored independently from the historical three native sprite
+    # slots. A 4th/5th/etc TiDB colleague therefore keeps manual on/off state
+    # even if an older cleaner truncates world.agents internally.
+    install_character_presence_runtime()
 
-    # Every /api/town/world response projects TiDB colleagues after the three
-    # native sprite slots into the generic renderer payload. This is presentation
-    # only and never writes the synthetic entities back into TiDB world state.
-    install_colleague_world_projection(app)
+    # This is installed after the admin fast/reliability director stack. Manual
+    # admin actions involving permanent colleagues override automatic night/day
+    # presence rules and dynamic colleagues get visible generic scene actions.
+    install_admin_manual_priority_patch()
 
     endpoint = "town_ai.save_state"
     previous = app.view_functions.get(endpoint)
@@ -97,13 +93,13 @@ def install_state_merge_guard(app):
             "atomic": True,
             "preserved": preserved,
             "generic_entity_count": len(world.get("genericEntities") or []) if isinstance(world, dict) else 0,
+            "character_presence_count": len(world.get("characterPresence") or {}) if isinstance(world, dict) else 0,
         })
 
     guarded_save_state._town_state_merge_guard = True
     app.view_functions[endpoint] = guarded_save_state
 
-    # The admin route is registered on the same blueprint. Verify every
-    # successful spawn against an authoritative TiDB readback before returning
-    # it to the browser.
+    # Verify successful generic spawns against an authoritative TiDB readback
+    # before returning the admin response to the browser.
     install_admin_spawn_persistence_guard(app)
     return True
