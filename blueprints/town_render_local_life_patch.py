@@ -8,7 +8,6 @@ as an API/network fallback.
 """
 
 from .town_render_admin_entity_sync_patch import patch_render_admin_entity_sync
-from .town_render_extra_colleagues_patch import patch_render_extra_colleagues
 from .town_render_performance_patch import patch_render_performance
 from .town_render_permanent_colleagues_patch import patch_render_permanent_colleagues
 
@@ -120,14 +119,9 @@ def patch_render_local_life(html: str) -> str:
     html = html.replace("aiAutoTimer=aiAuto?rand(15,35):999999;", "aiAutoTimer=aiAuto?rand(300,600):999999;")
     html = html.replace("if(aiAuto)aiAutoTimer=rand(8,22);", "if(aiAuto)aiAutoTimer=rand(300,600);")
 
-    # Legacy compatibility projection. The dedicated permanent colleague layer
-    # below is authoritative for the 4th+ TiDB colleague and does not depend on
-    # this marker-based path.
-    html = patch_render_extra_colleagues(html)
-
     # Permanent employees added through TiDB get their own renderer/lifecycle,
     # separate from temporary visitors, celebrities, animals and other generic
-    # story actors.
+    # story actors. This is the sole 4th+ colleague visual path.
     html = patch_render_permanent_colleagues(html)
 
     # Admin command responses already contain the authoritative evolved world.
