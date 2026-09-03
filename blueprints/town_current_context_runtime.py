@@ -1,10 +1,9 @@
 """Persistent current-world context for CUSTOMS AGENT TOWN.
 
 Fresh public information is collected independently from DeepSeek, persisted in
-TiDB, and reused by every AI conversation/director call.  The model therefore
-receives sourced headlines/weather instead of being asked to invent current
-events.  A small daemon refreshes the feed periodically without blocking page
-rendering; callers can also refresh lazily when the stored snapshot is stale.
+TiDB, and reused by every AI conversation/director call. The feed deliberately
+covers local, national, Latin-American and world news so Iquique is the setting,
+not the characters' entire conversational universe.
 """
 
 from __future__ import annotations
@@ -92,7 +91,7 @@ def _write_stored(payload):
     return data
 
 
-def _rss_query(query, category, limit=6):
+def _rss_query(query, category, limit=5):
     response = requests.get(
         "https://news.google.com/rss/search",
         params={"q": query, "hl": "es-419", "gl": "CL", "ceid": "CL:es-419"},
@@ -168,15 +167,18 @@ def refresh_current_context(force=False):
         queries = (
             ("Iquique OR Tarapacá", "iquique_tarapaça"),
             ("Chile noticias", "chile"),
+            ("América Latina noticias", "latin_america"),
+            ("mundo noticias internacionales", "world"),
             ("Iquique puerto OR ZOFRI OR aduana OR comercio exterior", "puerto_zofri_aduana"),
         )
         for query, category in queries:
             try:
-                news.extend(_rss_query(query, category, limit=6))
+                news.extend(_rss_query(query, category, limit=5))
             except Exception as exc:
                 errors.append(f"news:{category}:{str(exc)[:100]}")
 
-        # De-duplicate the same headline returned by several queries.
+        # De-duplicate the same headline returned by several queries while
+        # keeping a wider pool for category-balanced selection later.
         deduped = []
         seen = set()
         for item in sorted(news, key=lambda x: int(x.get("published_at_ms") or 0), reverse=True):
@@ -185,7 +187,7 @@ def refresh_current_context(force=False):
                 continue
             seen.add(key)
             deduped.append(item)
-            if len(deduped) >= 16:
+            if len(deduped) >= 24:
                 break
 
         weather = {}
@@ -194,7 +196,6 @@ def refresh_current_context(force=False):
         except Exception as exc:
             errors.append("weather:" + str(exc)[:100])
 
-        # Never overwrite a useful snapshot with a completely empty network failure.
         if not deduped and not weather:
             if stored:
                 return stored
@@ -206,7 +207,7 @@ def refresh_current_context(force=False):
             "news": deduped if deduped else list(stored.get("news") or []),
             "weather": weather if weather else dict(stored.get("weather") or {}),
             "sources": ["Google News RSS", "Open-Meteo"],
-            "errors": errors[-4:],
+            "errors": errors[-6:],
         }
         return _write_stored(payload)
 
@@ -227,22 +228,46 @@ def current_context(refresh_if_stale=True):
 
 
 def recent_news_for_ai(limit=10):
+    """Return recent headlines balanced across categories, not just top-N local."""
     ctx = current_context(refresh_if_stale=True)
-    result = []
-    for item in (ctx.get("news") or [])[: max(1, int(limit))]:
-        if not isinstance(item, dict) or not item.get("title"):
-            continue
-        result.append({
-            "title": str(item.get("title") or "")[:220],
-            "source": str(item.get("source") or "")[:80],
-            "published": str(item.get("published") or "")[:60],
-            "category": str(item.get("category") or "")[:40],
-        })
-    return result
+    rows = [item for item in (ctx.get("news") or []) if isinstance(item, dict) and item.get("title")]
+    if not rows:
+        return []
+
+    categories = []
+    buckets = {}
+    for item in rows:
+        category = str(item.get("category") or "other")[:40]
+        if category not in buckets:
+            buckets[category] = []
+            categories.append(category)
+        buckets[category].append(item)
+
+    picked = []
+    target = max(1, int(limit))
+    cursor = 0
+    while len(picked) < target and categories:
+        category = categories[cursor % len(categories)]
+        bucket = buckets.get(category) or []
+        if bucket:
+            item = bucket.pop(0)
+            picked.append({
+                "title": str(item.get("title") or "")[:220],
+                "source": str(item.get("source") or "")[:80],
+                "published": str(item.get("published") or "")[:60],
+                "category": category,
+            })
+        if not bucket:
+            categories = [c for c in categories if buckets.get(c)]
+            cursor = 0
+        else:
+            cursor += 1
+        if not categories:
+            break
+    return picked[:target]
 
 
 def _background_loop():
-    # Do not slow gunicorn/page startup; refresh after the process is already ready.
     time.sleep(3)
     while True:
         try:
