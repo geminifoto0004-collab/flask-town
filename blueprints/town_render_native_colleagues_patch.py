@@ -1,10 +1,11 @@
 """Extend the mature native browser agent engine with every TiDB colleague.
 
-There must be one employee rendering/movement/chat method, not a separate
+There must be one employee rendering/movement/chat/work method, not a separate
 canvas for the 4th+ colleague. The authoritative TiDB roster is embedded into
-the generated HTML so all permanent colleagues exist in the native `agents`
-array before the first game frame. Background fetches then reconcile later
-TiDB changes without a visible three-then-five pop-in.
+the generated HTML so all permanent colleagues exist in native `agents` before
+the first game frame. TiDB numeric traits are promoted onto each native agent,
+matching the server character runtime, so work/idle behavior does not inherit a
+cloned template's personality by accident.
 """
 
 import json
@@ -21,6 +22,7 @@ def _bootstrap_rows():
     for row in rows if isinstance(rows, list) else []:
         if not isinstance(row, dict) or not row.get("id"):
             continue
+        traits = dict(row.get("traits") or {}) if isinstance(row.get("traits"), dict) else {}
         result.append({
             "id": str(row.get("id") or "").upper(),
             "name": str(row.get("name") or row.get("id") or ""),
@@ -29,6 +31,7 @@ def _bootstrap_rows():
             "careerState": str(row.get("careerState") or "active"),
             "workStyle": str(row.get("workStyle") or ""),
             "displayOrder": row.get("displayOrder", 0),
+            "traits": traits,
             "profile": {
                 "gender": str(row.get("gender") or ""),
                 "birthYear": row.get("birthYear"),
@@ -39,7 +42,7 @@ def _bootstrap_rows():
                 "workStyle": str(row.get("workStyle") or ""),
                 "personalityNotes": str(row.get("personalityNotes") or ""),
                 "familyNotes": str(row.get("familyNotes") or ""),
-                "traits": dict(row.get("traits") or {}) if isinstance(row.get("traits"), dict) else {},
+                "traits": traits,
             },
         })
     return result
@@ -60,6 +63,9 @@ def patch_render_native_colleagues(html: str) -> str:
   let townTiDBRosterBusy=false;
   let townTiDBRosterKey='';
   const townTiDBDynamicIds=new Set();
+  const townShipAssignmentCounts={};
+  const townShipTaskState=new Map();
+  let townShipAssignmentSignature='';
 
   function townFemaleGender(value){
     const g=String(value||'').trim().toLowerCase();
@@ -67,7 +73,19 @@ def patch_render_native_colleagues(html: str) -> str:
   }
   function townAgentId(a){return String(a&&a.name||a&&a.slot||'').trim().toUpperCase();}
 
+  function townApplyTiDBTraits(agent,row){
+    if(!agent||!row)return;
+    const source=(row.traits&&typeof row.traits==='object')?row.traits:((row.profile&&row.profile.traits&&typeof row.profile.traits==='object')?row.profile.traits:{});
+    Object.entries(source).forEach(([key,value])=>{
+      if(!key)return;
+      const n=Number(value);
+      if(Number.isFinite(n))agent[String(key)]=Math.max(0,Math.min(1,n));
+    });
+  }
+
   function townCloneAgentTemplate(row,rowIndex,rows,world){
+    // The first three are visual templates only. Employee identity/behavior is
+    // always overwritten from the corresponding TiDB row below.
     const native=agents.slice(0,Math.min(3,agents.length));
     if(!native.length)return null;
     const wantFemale=townFemaleGender(row&&row.gender);
@@ -89,6 +107,7 @@ def patch_render_native_colleagues(html: str) -> str:
     clone.profile={...(template.profile||{}),...(row.profile||{}),gender:String(row.gender||'')};
     clone.careerState=String(row.careerState||row.profile&&row.profile.careerState||'active');
     clone.workStyle=String(row.workStyle||row.profile&&row.profile.workStyle||'');
+    townApplyTiDBTraits(clone,row);
     const presence=world&&world.characterPresence&&world.characterPresence[clone.name];
     if(presence&&typeof presence==='object'){
       if(typeof presence.manualOffDuty==='boolean')clone.manualOffDuty=presence.manualOffDuty;
@@ -113,6 +132,9 @@ def patch_render_native_colleagues(html: str) -> str:
       agent.profile={...(agent.profile||{}),...(row.profile||{}),gender:String(row.gender||'')};
       agent.careerState=String(row.careerState||row.profile&&row.profile.careerState||agent.careerState||'active');
       agent.workStyle=String(row.workStyle||row.profile&&row.profile.workStyle||agent.workStyle||'');
+      // Match server-side _merge_world_characters: TiDB numeric traits are
+      // first-class agent properties, not merely descriptive profile metadata.
+      townApplyTiDBTraits(agent,row);
       const pr=presence[id];
       if(pr&&typeof pr==='object'){
         if(typeof pr.manualOffDuty==='boolean')agent.manualOffDuty=pr.manualOffDuty;
@@ -143,6 +165,28 @@ def patch_render_native_colleagues(html: str) -> str:
     return true;
   }
 
+  function townObserveShipAssignments(){
+    try{
+      const roster=Array.isArray(agents)?agents.filter(a=>a&&townAgentId(a)):[];
+      const active=[];
+      roster.forEach(agent=>{
+        const id=townAgentId(agent),hasTask=!!agent.task||agent.state==='workingShip'||agent.state==='inspect';
+        const previous=!!townShipTaskState.get(id);
+        if(hasTask&&!previous)townShipAssignmentCounts[id]=(townShipAssignmentCounts[id]||0)+1;
+        townShipTaskState.set(id,hasTask);
+        if(hasTask)active.push(id);
+      });
+      const sig=active.slice().sort().join(',');
+      if(sig&&sig!==townShipAssignmentSignature){
+        townShipAssignmentSignature=sig;
+        const onDuty=roster.filter(a=>!a.manualOffDuty&&(typeof isAgentOnDuty!=='function'||isAgentOnDuty(a))).map(townAgentId);
+        const waiting=onDuty.filter(id=>!active.includes(id));
+        if(typeof addLog==='function')addLog('船務分派：'+active.join(',')+(waiting.length?'｜待命：'+waiting.join(','):''));
+      }else if(!sig){townShipAssignmentSignature='';}
+      window.__townShipAssignmentStats=()=>({counts:{...townShipAssignmentCounts},working:active.slice(),roster:roster.map(townAgentId)});
+    }catch(_e){}
+  }
+
   // IMPORTANT: hydrate from the TiDB roster embedded by Flask synchronously,
   // before sync()/animation can paint the historical three native slots alone.
   townMergeTiDBRowsIntoNativeAgents(townTiDBBootstrapRows,{},false);
@@ -164,10 +208,9 @@ def patch_render_native_colleagues(html: str) -> str:
   }
 
   window.__townRefreshNativeColleagues=townRefreshTiDBNativeColleagues;
-  // Reconcile presence/current TiDB edits shortly after load, but first-frame
-  // colleague creation has already happened synchronously above.
   setTimeout(townRefreshTiDBNativeColleagues,120);
   setInterval(townRefreshTiDBNativeColleagues,4000);
+  setInterval(townObserveShipAssignments,350);
 
 '''.replace('__TOWN_BOOTSTRAP_ROWS__', bootstrap_json)
     return html.replace(marker, runtime + marker, 1)
