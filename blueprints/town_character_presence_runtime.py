@@ -3,16 +3,14 @@
 Several historical world cleaners were written for exactly three native sprite
 slots and can truncate agent state. Character identity is now unlimited and
 TiDB-driven, so presence must live in a server-owned map independent of the
-legacy agents array. This wrapper restores that state after every clean/apply.
+legacy agents array. Permanent colleagues also must never remain duplicated in
+genericEntities: employees use the single native agent engine only.
 """
 
 from __future__ import annotations
 
 from . import town_ai_bp as _base
 from .town_character_tidb_runtime import character_id_set, refresh_runtime_character_bindings
-
-
-_PRESENCE_KEYS = ("manualOffDuty", "dutyState")
 
 
 def _agent_id(agent):
@@ -67,8 +65,19 @@ def _merge_presence(base, overlay):
     return result
 
 
-def _apply_to_agents(world, presence):
+def _purge_employee_generic_entities(world, valid_ids):
     world = dict(world or {})
+    generic = world.get("genericEntities") if isinstance(world.get("genericEntities"), list) else []
+    world["genericEntities"] = [
+        dict(item) for item in generic
+        if isinstance(item, dict)
+        and str(item.get("id") or "").strip().upper() not in valid_ids
+    ]
+    return world
+
+
+def _apply_to_agents(world, presence, valid_ids):
+    world = _purge_employee_generic_entities(world, valid_ids)
     agents = [dict(a) for a in world.get("agents", []) if isinstance(a, dict)]
     for agent in agents:
         cid = _agent_id(agent)
@@ -98,9 +107,7 @@ def install_character_presence_runtime():
         presence = _clean_presence(source.get("characterPresence"), valid_ids)
         presence = _merge_presence(presence, _presence_from_agents(source.get("agents"), valid_ids))
         cleaned = previous_clean(world)
-        # The character runtime outside older three-slot cleaners recreates all
-        # TiDB agents; reapply server-owned presence afterwards.
-        return _apply_to_agents(cleaned, presence)
+        return _apply_to_agents(cleaned, presence, valid_ids)
 
     def apply_persistent_actions(world, actions):
         refresh_runtime_character_bindings()
@@ -112,9 +119,6 @@ def install_character_presence_runtime():
         evolved = previous_apply(world, actions)
         presence = _merge_presence(presence, _presence_from_agents((evolved or {}).get("agents"), valid_ids))
 
-        # Reapply every shift action after the legacy chain, because an older
-        # three-slot shift runtime can otherwise discard the 4th+ colleague's
-        # updated state before the character runtime recreates that agent.
         for action in actions or []:
             if not isinstance(action, dict) or str(action.get("type") or "") != "agent_shift":
                 continue
@@ -122,12 +126,9 @@ def install_character_presence_runtime():
             mode = str(action.get("mode") or action.get("shift") or "").lower()
             if cid not in valid_ids or mode not in {"on", "off"}:
                 continue
-            presence[cid] = {
-                "manualOffDuty": mode == "off",
-                "dutyState": mode,
-            }
+            presence[cid] = {"manualOffDuty": mode == "off", "dutyState": mode}
 
-        return _apply_to_agents(evolved, presence)
+        return _apply_to_agents(evolved, presence, valid_ids)
 
     _base._clean_world = clean_world
     _base._apply_persistent_actions = apply_persistent_actions
