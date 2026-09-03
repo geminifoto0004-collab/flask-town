@@ -10,8 +10,6 @@ other production blueprints.
 
 import os
 
-# blueprints/__init__.py checks this before importing any unrelated main-service
-# modules. It must be set before the first blueprints.* import below.
 os.environ["TOWN_STANDALONE_SERVICE"] = "1"
 
 from flask import Flask, jsonify, redirect
@@ -47,8 +45,6 @@ from blueprints.town_character_tidb_runtime import (
 from blueprints.town_character_validation_patch import install_character_validation_patch
 from blueprints.town_roster_integrity_runtime import install_roster_integrity_runtime
 
-# Import side effect: allow longer composed tool-call sequences before admin and
-# language runtimes bind the action parser.
 from blueprints import town_ai_toolcall_limit_patch as _town_ai_toolcall_limit_patch  # noqa: F401
 
 from blueprints.town_admin_runtime import install_town_admin_runtime
@@ -65,7 +61,7 @@ from blueprints.town_state_merge_runtime import install_state_merge_guard
 
 from blueprints import town_page_bp as _town_page_module
 from blueprints.town_latest_page_runtime import latest_town_html
-from blueprints.town_render_roster_unification_patch import patch_render_roster_unification
+from blueprints.town_render_roster_unification_patch import patch_render_roster_unification, roster_unification_stats
 from blueprints.town_render_visibility_patch import patch_render_visibility
 from blueprints.town_render_action_patch import patch_render_actions
 from blueprints.town_render_depth_patch import patch_render_depth
@@ -99,7 +95,6 @@ app.config.update(
 )
 
 
-# Keep the currently stable town runtime chain isolated from the main service.
 install_latest_action_runtime()
 install_visibility_runtime()
 install_history_runtime()
@@ -110,46 +105,29 @@ install_sea_runtime()
 install_shift_runtime()
 install_world_object_runtime()
 install_generic_entity_runtime()
-
-# Generic creation layer: AI can define reusable visual/behavior data in TiDB,
-# spawn instances from it, then use semantic interactions on those instances.
 install_entity_template_runtime()
 install_entity_interaction_runtime()
-
 install_relationship_runtime()
 install_officer_scene_runtime()
-# Put the capacity adapter after the older validators so their small per-call
-# caps cannot silently erase later actors in a larger admin scene.
 install_action_capacity_patch()
 install_generic_scene_runtime()
-# Semantic kinds are normalized before they reach the mature five-class
-# renderer. The world-scene compiler is installed after this layer so its
-# expanded spawn actions are normalized by the compatibility validator.
 install_entity_type_compat_patch()
 install_world_scene_runtime()
 install_tidb_world_runtime()
 install_tidb_dialogue_runtime()
 
-# Character identity/personality is owned by TiDB. The SQL file seeds a brand-
-# new installation; subsequent character data is edited in TiDB/admin API.
 if not character_ids(force=True):
     run_sql_migration_file(
         os.path.join(os.path.dirname(__file__), "migrations", "20260831_town_characters.sql")
     )
 install_character_runtime()
-# Final integrity guard: an older three-slot runtime may no longer erase the
-# runtime state of the 4th+ TiDB colleague.
 install_roster_integrity_runtime()
 
 install_admin_scene_runtime()
 install_officer_scene_admin_patch()
 install_admin_freedom_patch()
-# Final dialogue validation reads the current TiDB officer IDs instead of any
-# legacy source-code name list.
 install_character_validation_patch()
 install_character_director_patch()
-# Manual/admin AI must stay comfortably inside the Gunicorn request budget:
-# stored TiDB context only, compact universal tools, 12-second DeepSeek bound.
 install_admin_fast_path_patch()
 install_admin_reliability_patch()
 install_auto_chat_runtime()
@@ -158,19 +136,12 @@ install_entity_template_director_patch()
 install_town_admin_runtime()
 install_character_admin_runtime()
 
-# /api/town/think uses the grounded director after all validation/persistence
-# wrappers are installed.
 _town_ai_module._model_decision = grounded_model_decision
 town_ai_bp = _town_ai_module.town_ai_bp
 
 
 def _build_cached_town_html():
-    """Compose the browser build once per Render worker, not once per request.
-
-    Keep the original mature pixel-character renderer/movement loop. TiDB owns
-    the permanent roster, so historical three-agent participant caps are removed
-    from the original HTML before any later visual patches are injected.
-    """
+    """Compose one TiDB-roster-driven native browser build per Render worker."""
     html = latest_town_html()
     html = patch_render_roster_unification(html)
     html = patch_render_visibility(html)
@@ -194,17 +165,12 @@ def _build_cached_town_html():
     return html
 
 
-# Heavy gzip reconstruction and string patching happen once when this gunicorn
-# worker starts. Every /customs-town request afterwards returns the same cached
-# string immediately.
 _TOWN_HTML_CACHE = _build_cached_town_html()
 town_page_bp = _town_page_module.town_page_bp
 _town_page_module._patched_town_html = lambda: _TOWN_HTML_CACHE
 
 app.register_blueprint(town_ai_bp)
 app.register_blueprint(town_page_bp)
-# The native page periodically POSTs a partial/legacy world snapshot. Protect
-# TiDB-owned AI entities/objects/dialogue from being erased by that stale state.
 _STATE_MERGE_GUARD = install_state_merge_guard(app)
 
 
@@ -220,6 +186,7 @@ def town_ping():
 
 @app.get("/health")
 def town_health():
+    roster_stats = roster_unification_stats()
     return jsonify(
         {
             "ok": True,
@@ -241,6 +208,8 @@ def town_health():
             "world_scene_runtime": True,
             "roster_integrity_runtime": True,
             "native_roster_unification": True,
+            "native_roster_cap_replacements": roster_stats.get("replacements", 0),
+            "native_roster_audit": roster_stats,
             "state_merge_guard": bool(_STATE_MERGE_GUARD),
             "native_character_renderer": True,
         }
