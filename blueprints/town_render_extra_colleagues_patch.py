@@ -3,8 +3,9 @@
 The mature browser game owns three historical officer sprites. TiDB may contain
 more permanent colleagues. Build synthetic persistent human sprites for every
 additional database-defined colleague by combining world.agents with the
-server-owned world.characterProfiles list. This keeps extra colleagues visible
-even when an older browser snapshot still contains only the three native agents.
+server-owned world.characterProfiles list. Also expose the authoritative TiDB
+roster in the event log so nighttime/off-duty visibility cannot hide whether a
+new colleague was actually created.
 """
 
 
@@ -59,9 +60,34 @@ def patch_render_extra_colleagues(html: str) -> str:
     if patched:
         html = html.replace(marker, replacement, 1)
 
-    tag = (
-        '\n<script id="town-extra-colleagues-runtime">'
-        + ('window.TOWN_EXTRA_COLLEAGUES=true;' if patched else 'window.TOWN_EXTRA_COLLEAGUES=false;')
-        + '</script>\n'
-    )
-    return html.replace('</body>', tag + '</body>', 1) if '</body>' in html else html + tag
+    roster_js = r'''
+<script id="town-extra-colleagues-runtime">
+window.TOWN_EXTRA_COLLEAGUES=%s;
+(()=>{
+  let last='';
+  async function refreshRoster(){
+    try{
+      const r=await fetch('/api/town/colleagues',{headers:{Accept:'application/json'}});
+      if(!r.ok)return;
+      const data=await r.json();
+      const rows=Array.isArray(data&&data.characters)?data.characters:[];
+      const ids=rows.map(v=>String(v&&v.id||'').toUpperCase()).filter(Boolean);
+      window.__townTiDBColleagues=rows;
+      const signature=ids.join('|');
+      if(signature===last)return;
+      last=signature;
+      const app=document.getElementById('customs-sim');
+      const box=app&&app.querySelector('#eventLog');
+      if(box){
+        const d=document.createElement('div');
+        d.textContent='> 正式同事(TiDB)：'+(ids.length?ids.join('、'):'尚無資料');
+        box.appendChild(d);box.scrollTop=box.scrollHeight;
+      }
+    }catch(_e){}
+  }
+  refreshRoster();setInterval(refreshRoster,30000);
+})();
+</script>
+''' % ('true' if patched else 'false')
+
+    return html.replace('</body>', roster_js + '</body>', 1) if '</body>' in html else html + roster_js
