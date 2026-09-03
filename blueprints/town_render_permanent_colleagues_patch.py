@@ -32,7 +32,7 @@ def patch_render_permanent_colleagues(html: str) -> str:
   const people=new Map();
   const nativeIds=new Set();
   const nativePos=new Map();
-  let refreshing=false,last=performance.now();
+  let refreshing=false,last=performance.now(),lastRosterKey='';
   window.__townPermanentColleagueIds=new Set();
 
   function log(text){const box=app.querySelector('#eventLog');if(!box)return;const d=document.createElement('div');d.textContent='> '+text;box.appendChild(d);box.scrollTop=box.scrollHeight;}
@@ -85,6 +85,8 @@ def patch_render_permanent_colleagues(html: str) -> str:
 
   function merge(roster,world){
     const rows=Array.isArray(roster&&roster.characters)?roster.characters:[];
+    const rosterKey=rows.map(r=>String(r&&r.id||'').toUpperCase()).filter(Boolean).join(',');
+    if(rosterKey&&rosterKey!==lastRosterKey){lastRosterKey=rosterKey;log('正式同事(TiDB)：'+rosterKey);}
     const agents=Array.isArray(world&&world.agents)?world.agents:[];
     const generics=Array.isArray(world&&world.genericEntities)?world.genericEntities:[];
     nativeIds.clear();rows.slice(0,3).forEach(r=>nativeIds.add(String(r&&r.id||'').toUpperCase()));
