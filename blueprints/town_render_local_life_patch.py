@@ -8,11 +8,16 @@ as an API/network fallback.
 """
 
 from .town_render_admin_entity_sync_patch import patch_render_admin_entity_sync
+from .town_render_native_colleagues_patch import patch_render_native_colleagues
 from .town_render_performance_patch import patch_render_performance
-from .town_render_permanent_colleagues_patch import patch_render_permanent_colleagues
 
 
 def patch_render_local_life(html: str) -> str:
+    # First extend the original in-page `agents` array from TiDB. New permanent
+    # colleagues then use the SAME native renderer, movement, chat and depth
+    # engine as the first three employees. No second colleague canvas.
+    html = patch_render_native_colleagues(html)
+
     marker = "  function sync(){"
     if "function townLocalLifeTick()" not in html and marker in html:
         helper = r'''  let localLifeTimer=rand(12,28);
@@ -61,7 +66,7 @@ def patch_render_local_life(html: str) -> str:
 
   function currentLiveAgents(){
     if(!Array.isArray(agents))return [];
-    return agents.filter(a=>a&&a.name&&a.state!=='workingShip'&&a.state!=='inspect'&&a.state!=='chat'&&!a.manualOffDuty);
+    return agents.filter(a=>a&&a.name&&a.state!=='workingShip'&&a.state!=='inspect'&&a.state!=='chat'&&!a.manualOffDuty&&(typeof isAgentOnDuty!=='function'||isAgentOnDuty(a)));
   }
 
   async function townAiChatTick(){
@@ -118,11 +123,6 @@ def patch_render_local_life(html: str) -> str:
     html = html.replace("aiAutoTimer=rand(300,900);testDeepSeek();", "aiAutoTimer=rand(900,1800);testDeepSeek();")
     html = html.replace("aiAutoTimer=aiAuto?rand(15,35):999999;", "aiAutoTimer=aiAuto?rand(300,600):999999;")
     html = html.replace("if(aiAuto)aiAutoTimer=rand(8,22);", "if(aiAuto)aiAutoTimer=rand(300,600);")
-
-    # Permanent employees added through TiDB get their own renderer/lifecycle,
-    # separate from temporary visitors, celebrities, animals and other generic
-    # story actors. This is the sole 4th+ colleague visual path.
-    html = patch_render_permanent_colleagues(html)
 
     # Admin command responses already contain the authoritative evolved world.
     html = patch_render_admin_entity_sync(html)
