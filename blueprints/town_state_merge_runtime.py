@@ -19,6 +19,7 @@ import time
 from flask import jsonify, request
 
 from . import town_ai_bp as _base
+from .town_admin_manual_priority_patch import install_admin_manual_priority_patch
 from .town_admin_spawn_persistence_guard import install_admin_spawn_persistence_guard
 from .town_colleague_world_projection import install_colleague_world_projection
 from .town_world_lock_runtime import WORLD_LOCK, install_world_lock_runtime
@@ -42,6 +43,11 @@ def install_state_merge_guard(app):
     # lock wraps the authoritative storage functions rather than startup-local
     # JSON helpers.
     install_world_lock_runtime()
+
+    # This is installed after the admin fast/reliability director stack. Manual
+    # admin actions involving permanent colleagues therefore override automatic
+    # night/day presence rules and dynamic colleagues get generic visual actions.
+    install_admin_manual_priority_patch()
 
     # Every /api/town/world response projects TiDB colleagues after the three
     # native sprite slots into the generic renderer payload. This is presentation
