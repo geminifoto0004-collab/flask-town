@@ -155,8 +155,21 @@ def _install_routes_once():
                     "name": row.get("name") or row.get("id"),
                     "gender": row.get("gender") or "",
                     "birthYear": row.get("birthYear"),
+                    "careerState": row.get("careerState") or "active",
                     "workStyle": row.get("workStyle") or "",
                     "displayOrder": row.get("displayOrder", 0),
+                    "profile": {
+                        "gender": row.get("gender") or "",
+                        "birthYear": row.get("birthYear"),
+                        "maritalStatus": row.get("maritalStatus") or "",
+                        "partnerLabel": row.get("partnerLabel") or "",
+                        "childrenCount": row.get("childrenCount", 0),
+                        "careerState": row.get("careerState") or "active",
+                        "workStyle": row.get("workStyle") or "",
+                        "personalityNotes": row.get("personalityNotes") or "",
+                        "familyNotes": row.get("familyNotes") or "",
+                        "traits": dict(row.get("traits") or {}),
+                    },
                 }
                 for row in rows
             ],
