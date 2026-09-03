@@ -3,6 +3,9 @@
 The base town_ai_bp intentionally stays conservative. This module expands only
 purpose-built town actions used by the current App Block while keeping the
 server as the validation boundary. No arbitrary JavaScript or SQL is accepted.
+
+Permanent officer identity/count is TiDB-owned. No operation in this layer may
+truncate the roster to the historical three browser slots.
 """
 
 import re
@@ -17,7 +20,21 @@ _ORIGINAL_VALIDATE = _base._validate_actions
 _ORIGINAL_APPLY = _base._apply_persistent_actions
 _ORIGINAL_CLEAN = _base._clean_world
 _HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
-_AGENT_IDS = {"MIA", "ANA", "LIA"}
+# This set is refreshed from TiDB by town_character_tidb_runtime. It starts
+# empty deliberately: source code is not an authoritative personnel roster.
+_AGENT_IDS = set()
+
+
+def _current_agent_ids():
+    try:
+        from .town_character_tidb_runtime import character_id_set, refresh_runtime_character_bindings
+        refresh_runtime_character_bindings()
+        ids = character_id_set()
+        if ids:
+            return ids
+    except Exception:
+        pass
+    return set(_AGENT_IDS)
 
 
 def _at_seconds(item):
@@ -48,9 +65,9 @@ def clean_world(world):
                     continue
                 safe.append({
                     "type": str(item.get("type") or "")[:40],
-                    "agent": str(item.get("agent") or "")[:18],
-                    "displayName": str(item.get("displayName") or "")[:24],
-                    "reason": str(item.get("reason") or "")[:40],
+                    "agent": str(item.get("agent") or "")[:64],
+                    "displayName": str(item.get("displayName") or "")[:64],
+                    "reason": str(item.get("reason") or "")[:80],
                     "annoyance": item.get("annoyance"),
                     "dogLove": item.get("dogLove"),
                     "cleanliness": item.get("cleanliness"),
@@ -65,8 +82,9 @@ def validate_actions(raw_actions):
     valid = []
     if not isinstance(raw_actions, list):
         return valid
+    agent_ids = _current_agent_ids()
 
-    for item in raw_actions[:12]:
+    for item in raw_actions[:32]:
         if not isinstance(item, dict):
             continue
         kind = str(item.get("type") or "")
@@ -74,30 +92,38 @@ def validate_actions(raw_actions):
         if kind == "agent_chat":
             from_agent = str(item.get("from") or item.get("agent") or "").upper()
             to_agent = str(item.get("to") or item.get("target") or "").upper()
-            if from_agent not in _AGENT_IDS or to_agent not in _AGENT_IDS or from_agent == to_agent:
+            if from_agent not in agent_ids or to_agent not in agent_ids or from_agent == to_agent:
                 continue
             turns = []
             for index, turn in enumerate(item.get("turns") if isinstance(item.get("turns"), list) else []):
                 if not isinstance(turn, dict):
                     continue
                 speaker = str(turn.get("speaker") or turn.get("from") or (from_agent if index % 2 == 0 else to_agent)).upper()
-                text = str(turn.get("text") or turn.get("message") or "").strip()[:96]
+                text = str(turn.get("text") or turn.get("message") or "").strip()[:160]
+                text_zh = str(turn.get("text_zh") or turn.get("textZh") or "").strip()[:160]
                 if speaker in {from_agent, to_agent} and text:
-                    turns.append({"speaker": speaker, "text": text})
-                if len(turns) >= 8:
+                    row = {"speaker": speaker, "text": text}
+                    if text_zh:
+                        row["text_zh"] = text_zh
+                    turns.append(row)
+                if len(turns) >= 12:
                     break
             if turns:
                 valid.extend(_attach_time([{"type": "agent_chat", "from": from_agent, "to": to_agent, "turns": turns}], item))
 
         elif kind == "agent_say":
             agent = str(item.get("agent") or "").upper()
-            text = str(item.get("text") or item.get("message") or "").strip()[:120]
-            if agent in _AGENT_IDS and text:
-                valid.extend(_attach_time([{"type": "agent_say", "agent": agent, "text": text}], item))
+            text = str(item.get("text") or item.get("message") or "").strip()[:160]
+            text_zh = str(item.get("text_zh") or item.get("textZh") or "").strip()[:160]
+            if agent in agent_ids and text:
+                row = {"type": "agent_say", "agent": agent, "text": text}
+                if text_zh:
+                    row["text_zh"] = text_zh
+                valid.extend(_attach_time([row], item))
 
         elif kind == "agent_outfit":
             agent = str(item.get("agent") or "").upper()
-            if agent not in _AGENT_IDS:
+            if agent not in agent_ids:
                 continue
             valid.extend(_attach_time([{
                 "type": "agent_outfit",
@@ -143,7 +169,7 @@ def validate_actions(raw_actions):
 
         elif kind == "agent_evolve" and str(item.get("trait") or "") in {"cleanliness", "dogLove"}:
             agent = str(item.get("agent") or "").upper()
-            if agent not in _AGENT_IDS:
+            if agent not in agent_ids:
                 continue
             try:
                 delta = max(-0.18, min(0.18, float(item.get("delta", 0))))
@@ -155,9 +181,9 @@ def validate_actions(raw_actions):
         else:
             valid.extend(_attach_time(_ORIGINAL_VALIDATE([item]), item))
 
-        if len(valid) >= 10:
+        if len(valid) >= 32:
             break
-    return valid[:10]
+    return valid[:32]
 
 
 def apply_persistent_actions(world, actions):
@@ -173,7 +199,7 @@ def apply_persistent_actions(world, actions):
         kind = action.get("type")
         if kind == "agent_outfit":
             for agent in agents:
-                if str(agent.get("name") or "").upper() == action.get("agent"):
+                if str(agent.get("name") or agent.get("slot") or "").upper() == action.get("agent"):
                     agent["outfitDay"] = action.get("day") or ""
                     agent["outfit"] = {
                         "shirt": action.get("shirt"), "vest": action.get("vest"),
@@ -182,7 +208,7 @@ def apply_persistent_actions(world, actions):
                     break
         elif kind == "agent_evolve" and action.get("trait") in {"cleanliness", "dogLove"}:
             for agent in agents:
-                if str(agent.get("name") or "").upper() == action.get("agent"):
+                if str(agent.get("name") or agent.get("slot") or "").upper() == action.get("agent"):
                     trait = action.get("trait")
                     try:
                         current = float(agent.get(trait, 0.5))
@@ -198,7 +224,8 @@ def apply_persistent_actions(world, actions):
                     "label": action.get("label") or "AI object", "parts": action.get("parts") or [],
                 })
 
-    evolved["agents"] = agents[:3]
+    # Never truncate TiDB-defined colleagues to the three historical slots.
+    evolved["agents"] = agents
     evolved["furniture"] = furniture[:24]
     return evolved
 
