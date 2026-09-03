@@ -1,10 +1,10 @@
 """Reliability guard for manual/admin town directing.
 
 Keep manual commands fast by reading already-persisted public context instead of
-blocking on external news/weather refreshes.  Manual story seeds are still
+blocking on external news/weather refreshes. Manual story seeds are still
 DeepSeek-directed, but an explicit arrival/appearance request gets a minimal
 executable fallback when the model times out, returns an upstream error, or
-forgets to create the requested entity.  The fallback is generic plumbing, not
+forgets to create the requested entity. The fallback is generic plumbing, not
 story logic, and never performs a second model call in the same HTTP request.
 """
 
@@ -22,6 +22,13 @@ _ARRIVAL_MARKERS = (
     "來了", "来了", "來一", "来一", "出現", "出现", "進來", "进来", "到訪", "到访",
     "arrive", "arrived", "comes", "come in", "appear", "appears", "visit", "visits",
     "llega", "llegan", "aparece", "aparecen", "visita", "visitan",
+)
+
+# Generic language forms meaning "make/invite X come here".  These are syntax
+# patterns only; no person/story names live here.
+_CAUSATIVE_ARRIVAL_RE = re.compile(
+    r"(?:^|[，,。.!！?？;；\s])(?:叫|請|请|讓|让|邀請|邀请|喊)\s*([^，,。.!！?？;；]{1,48}?)\s*(?:來|来|過來|过来|進來|进来)(?=$|[，,。.!！?？;；\s]|去|到|唱|說|说|聊|做|表演|看看|一下)",
+    re.I,
 )
 
 _CHINESE_NUMBERS = {
@@ -58,9 +65,19 @@ def _stored_recent_news(limit=10):
     return result
 
 
+def _causative_subject(prompt):
+    text = str(prompt or "").strip()
+    if not text:
+        return ""
+    match = _CAUSATIVE_ARRIVAL_RE.search(" " + text)
+    if not match:
+        return ""
+    return str(match.group(1) or "").strip(" ，,。.!！?？:：;；")[:48]
+
+
 def _looks_like_new_entity_request(prompt):
     text = str(prompt or "").lower()
-    return any(marker in text for marker in _ARRIVAL_MARKERS)
+    return any(marker in text for marker in _ARRIVAL_MARKERS) or bool(_causative_subject(prompt))
 
 
 def _has_spawn(actions):
@@ -79,16 +96,36 @@ def _safe_slug(text):
     return (raw or "arrival")[:36]
 
 
+def _count_and_label(subject):
+    count = 1
+    label = str(subject or "").strip()
+    digit_match = re.match(r"^(\d{1,2})\s*(?:個|个|名|位|隻|只|台|輛|辆)?\s*(.+)$", label)
+    if digit_match:
+        return max(1, min(12, int(digit_match.group(1)))), digit_match.group(2).strip()
+    zh_match = re.match(r"^([一二兩两三四五六七八九十])\s*(?:個|个|名|位|隻|只|台|輛|辆)?\s*(.+)$", label)
+    if zh_match:
+        return _CHINESE_NUMBERS.get(zh_match.group(1), 1), zh_match.group(2).strip()
+    return count, label
+
+
 def _extract_arrival_seed(prompt):
     """Extract only the explicit visible core from an arrival-style admin seed.
 
-    This is deliberately small and generic.  It does not decide a story, mood,
-    dialogue or relationship.  It only recovers a requested visible entity when
-    the remote model is unavailable.
+    This is deliberately small and generic. It does not decide a story, mood,
+    dialogue or relationship. It only recovers a requested visible entity when
+    the remote model is unavailable or omits its creation tool.
     """
     text = str(prompt or "").strip()
     if not text:
         return None
+
+    # First handle causative grammar: 叫/請/讓/邀請 X 來/過來/進來 ...
+    # Example: "叫周杰倫來唱歌" -> subject "周杰倫".
+    subject = _causative_subject(text)
+    if subject:
+        count, label = _count_and_label(subject)
+        label = re.sub(r"^(?:有|突然|忽然|一群|一批)\s*", "", label).strip()
+        return {"label": label[:40], "count": count} if label else None
 
     lower = text.lower()
     positions = [(lower.find(marker.lower()), marker) for marker in _ARRIVAL_MARKERS if lower.find(marker.lower()) >= 0]
@@ -96,38 +133,20 @@ def _extract_arrival_seed(prompt):
         return None
     pos, marker = min(positions, key=lambda item: item[0])
 
-    # Chinese typically places the arriving entity before the marker; English/
-    # Spanish may do either.  Prefer the phrase immediately before the marker.
     subject = text[:pos].strip(" ，,。.!！?？:：;；")
     if not subject:
         subject = text[pos + len(marker):].strip(" ，,。.!！?？:：;；")
     if not subject:
         return None
 
-    # Drop common directive filler after the visible subject.
     subject = re.split(r"(?:\s+and\s+|\s+y\s+|，|,|；|;|然後|然后|對話|对话|聊天|自己想|自行導演|自行导演)", subject, maxsplit=1, flags=re.I)[0].strip()
     if not subject:
         return None
 
-    count = 1
-    label = subject
-
-    digit_match = re.match(r"^(\d{1,2})\s*(?:個|个|名|位|隻|只|台|輛|辆)?\s*(.+)$", label)
-    if digit_match:
-        count = max(1, min(12, int(digit_match.group(1))))
-        label = digit_match.group(2).strip()
-    else:
-        zh_match = re.match(r"^([一二兩两三四五六七八九十])\s*(?:個|个|名|位|隻|只|台|輛|辆)?\s*(.+)$", label)
-        if zh_match:
-            count = _CHINESE_NUMBERS.get(zh_match.group(1), 1)
-            label = zh_match.group(2).strip()
-
-    # Remove a leading generic verb fragment such as "有" / "突然" without
-    # maintaining any story-specific noun list.
+    count, label = _count_and_label(subject)
     label = re.sub(r"^(?:有|突然|忽然|一群|一批)\s*", "", label).strip()
     if not label:
         return None
-
     return {"label": label[:40], "count": count}
 
 
@@ -148,8 +167,6 @@ def _fallback_actions(prompt):
             "type": "spawn_entity",
             "id": f"fallback-{base}-{stamp}{suffix}"[:64],
             "name": display_name[:28],
-            # Neutral visible fallback.  The normal AI path remains responsible
-            # for richer semantic typing/visual templates and later behavior.
             "entityType": "human",
             "zone": "office_door",
         })
@@ -161,8 +178,6 @@ def _fallback_result(prompt, world, reason=""):
     if not raw:
         return None
 
-    # Pass through the current validator stack so fallback entities obey the
-    # exact same bounds/type/world rules as model-generated actions.
     from . import town_ai_bp as _base
     actions = _base._validate_actions(raw)
     if not actions:
@@ -183,8 +198,6 @@ def _fallback_result(prompt, world, reason=""):
 
 
 def install_admin_reliability_patch():
-    # Manual commands use the already-persisted snapshot. Background refresh/cron
-    # remains responsible for network I/O.
     _director._public_context_for_ai = _stored_public_context_for_ai
     _director.recent_news_for_ai = _stored_recent_news
 
@@ -205,6 +218,7 @@ EXECUTABLE REPRESENTATION AUDIT — HARD RULES:
 - One spawn_entity, spawn_from_template, or entity_scene represents exactly ONE newly created actor/entity. world_scene may contain many actors, but every actor entry still compiles to its own creation action.
 - If the administrator explicitly requests N new actors/entities, emit N distinct actor/creation entries with distinct stable ids. Never satisfy quantity only in intentSummary, directorNote, prose, or dialogue.
 - A sentence saying somebody arrived/appeared/entered is NOT execution. Every newly appearing person, animal, creature, vehicle, item or decoration must have a corresponding executable creation representation.
+- Causative arrival language such as 叫/請/讓/邀請 X 來/過來/進來 also REQUIRES an executable creation representation for X unless X already exists in the current world.
 - entity_scene is one actor's complete scene. For multiple actors or a broad event, prefer world_scene.
 - Before finishing, compare the requested visible facts against your tool calls and add any missing representation IN THIS SAME RESPONSE.
 - There will be no second model retry for a missing spawn. The first response must be executable and complete.
@@ -227,8 +241,6 @@ EXECUTABLE REPRESENTATION AUDIT — HARD RULES:
         if not (_looks_like_new_entity_request(prompt) and not _has_spawn(actions)):
             return result
 
-        # No second DeepSeek call.  Preserve the explicit visible core locally so
-        # a model formatting mistake cannot make the whole admin command vanish.
         fallback = _fallback_result(prompt, world, "missing_executable_spawn")
         if fallback:
             return fallback
