@@ -2,35 +2,44 @@
 
 
 def patch_render_admin_world(html: str) -> str:
+    # Explicit manual duty state is authoritative. A colleague the administrator
+    # calls back must stay visible even at night until explicitly sent off again.
     html = html.replace(
         "  function isAgentOnDuty(a){return !isIquiqueNight()||a.index===nightShiftIndex()||!!a.task;}",
-        "  function isAgentOnDuty(a){if(a?.manualOffDuty&&!a?.task)return false;return !isIquiqueNight()||a.index===nightShiftIndex()||!!a.task;}",
+        "  function isAgentOnDuty(a){if(a?.dutyState==='on')return true;if(a?.manualOffDuty||a?.dutyState==='off')return false;return !isIquiqueNight()||a.index===nightShiftIndex()||!!a.task;}",
         1,
     )
     html = html.replace(
         "careerState:a.careerState,generation:a.generation,state:a.state",
+        "careerState:a.careerState,manualOffDuty:!!a.manualOffDuty,dutyState:String(a.dutyState||''),generation:a.generation,state:a.state",
+        1,
+    )
+    # Some older composed builds already contain manualOffDuty from a previous
+    # patch. Add dutyState without duplicating the field.
+    html = html.replace(
         "careerState:a.careerState,manualOffDuty:!!a.manualOffDuty,generation:a.generation,state:a.state",
+        "careerState:a.careerState,manualOffDuty:!!a.manualOffDuty,dutyState:String(a.dutyState||''),generation:a.generation,state:a.state",
         1,
     )
     html = html.replace(
         "        if(Number.isFinite(Number(saved.generation)))a.generation=Number(saved.generation);",
-        "        if(Number.isFinite(Number(saved.generation)))a.generation=Number(saved.generation);\n        if(typeof saved.manualOffDuty==='boolean')a.manualOffDuty=saved.manualOffDuty;",
+        "        if(Number.isFinite(Number(saved.generation)))a.generation=Number(saved.generation);\n        if(typeof saved.manualOffDuty==='boolean')a.manualOffDuty=saved.manualOffDuty;\n        if(saved.dutyState==='on'||saved.dutyState==='off')a.dutyState=saved.dutyState;",
         1,
     )
     shift_marker = "  registerDirectorTool('agent_action',action=>{"
     if "registerDirectorTool('agent_shift'" not in html and shift_marker in html:
         shift_runtime = r'''  registerDirectorTool('agent_shift',action=>{
     const a=agents.find(x=>x.name===String(action.agent||'').toUpperCase());
-    if(!a){addLog('AI 班次指令未執行：找不到 '+String(action.agent||'')+' 這個角色');return;}
+    if(!a){addLog('AI 班次指令交給動態同事層：'+String(action.agent||''));return;}
     const mode=String(action.mode||action.shift||'').toLowerCase();
     if(mode==='off'){
       if(a.task){addLog('AI 班次指令未執行：'+agentLabel(a)+' 正在處理船務');return;}
-      a.manualOffDuty=true;a.state='offDuty';a.path=[];a.pathTarget='';a.chatText='';a.chatTimer=0;a.intentLabel='';a.intentUntil=0;
+      a.manualOffDuty=true;a.dutyState='off';a.state='offDuty';a.path=[];a.pathTarget='';a.chatText='';a.chatTimer=0;a.intentLabel='';a.intentUntil=0;
       addLog('AI 安排 '+agentLabel(a)+' 下班離開辦公室');saveWorld();return;
     }
     if(mode==='on'){
-      a.manualOffDuty=false;a.state='idle';a.x=a.homeX;a.y=a.homeY;a.timer=.2;a.decisionTimer=.2;
-      addLog('AI 安排 '+agentLabel(a)+' 回來上班');saveWorld();
+      a.manualOffDuty=false;a.dutyState='on';a.state='idle';a.x=a.homeX;a.y=a.homeY;a.timer=.2;a.decisionTimer=.2;
+      addLog('AI 召回 '+agentLabel(a)+' 回辦公室');saveWorld();
     }
   });
 '''
@@ -47,8 +56,8 @@ def patch_render_admin_world(html: str) -> str:
 #customs-sim:not(.town-admin-mode) #aiAutoBtn,
 #customs-sim:not(.town-admin-mode) #resetBtn{display:none!important}
 #customs-sim #town-admin-btn{order:-20}
-#customs-sim #town-world-prompt{display:none;align-items:center;gap:6px;flex:1 1 360px;min-width:280px}
 #customs-sim.town-admin-mode #town-world-prompt{display:flex!important}
+#customs-sim #town-world-prompt{display:none;align-items:center;gap:6px;flex:1 1 360px;min-width:280px}
 #customs-sim #town-world-prompt-input{min-height:44px;flex:1 1 auto;min-width:220px;border:2px solid light-dark(#655d50,#3c4657);background:light-dark(#fffaf0,#202936);color:inherit;padding:8px 10px;font:inherit;box-sizing:border-box}
 #customs-sim #town-world-prompt-run{min-height:44px;min-width:110px}
 #customs-sim .game-wrap{position:relative}
