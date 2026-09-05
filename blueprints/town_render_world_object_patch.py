@@ -60,8 +60,14 @@ def patch_render_world_objects(html: str) -> str:
     o.phase=(Number(o.phase)||0)+dt*1.7;
     const behavior=String(o.behavior||'static'),b=bounds(String(o.zone||''));
     let speed=0;
-    if(behavior==='swim_left')speed=-10;else if(behavior==='swim_right')speed=10;else if(behavior==='drive_left')speed=-28;else if(behavior==='drive_right')speed=28;else if(behavior==='drift')speed=(Number(o.direction)<0?-1:1)*6;
-    if(speed){o.x=Number(o.x||0)+speed*dt;if(o.x<b.l)o.x=b.r;if(o.x>b.r)o.x=b.l;}
+    if(behavior==='swim_left')speed=-20;else if(behavior==='swim_right')speed=20;else if(behavior==='drive_left')speed=-34;else if(behavior==='drive_right')speed=34;else if(behavior==='drift')speed=(Number(o.direction)<0?-1:1)*10;
+    if(speed){
+      o.x=Number(o.x||0)+speed*dt;
+      if(o.x<b.l||o.x>b.r){
+        if(o.persistent)o.x=o.x<b.l?b.r:b.l;
+        else o.finished=true;
+      }
+    }
   }
   function visitorTarget(name){return ({MIA:132,ANA:272,LIA:412})[String(name||'').toUpperCase()]||320;}
   function visitorPosition(v,now){
@@ -82,7 +88,10 @@ def patch_render_world_objects(html: str) -> str:
   window.__townSceneLayers=window.__townSceneLayers||[];
   window.__townSceneLayers.push(dt=>{
     const items=[],now=Date.now();
-    objects.forEach(o=>{stepObject(o,dt);items.push({y:Number(o.y)||0,draw:()=>drawObject(o)});});
+    objects.forEach(o=>{
+      if(o.finished||(Number(o.expiresAt)>0&&Number(o.expiresAt)<=now))return;
+      stepObject(o,dt);if(!o.finished)items.push({y:Number(o.y)||0,draw:()=>drawObject(o)});
+    });
     visitors.forEach(v=>items.push({y:visitorPosition(v,now).y+14,draw:()=>drawVisitor(v,now)}));
     return items;
   });
@@ -95,7 +104,11 @@ def patch_render_world_objects(html: str) -> str:
       const data=await r.json(),world=data&&data.world||{};
       const incoming=Array.isArray(world.worldObjects)?world.worldObjects:[];
       const oldById=new Map(objects.map(o=>[String(o.id||''),o]));
-      objects=incoming.slice(-40).map(raw=>{const old=oldById.get(String(raw&&raw.id||''));return {...raw,x:Number(raw&&raw.x||0),y:Number(raw&&raw.y||0),phase:old?Number(old.phase||0):Math.random()*6.28};});
+      objects=incoming.slice(-40).map(raw=>{
+        const old=oldById.get(String(raw&&raw.id||''));
+        const same=old&&Number(old.instanceVersion||old.createdAt||0)===Number(raw&&raw.instanceVersion||raw&&raw.createdAt||0);
+        return {...raw,x:same?Number(old.x||0):Number(raw&&raw.x||0),y:same?Number(old.y||0):Number(raw&&raw.y||0),phase:same?Number(old.phase||0):Math.random()*6.28,finished:same&&!!old.finished};
+      });
       visitors=Array.isArray(world.visitors)?world.visitors.slice(-8).map(v=>({...v})):[];
     }catch(_e){}finally{refreshing=false;}
   }

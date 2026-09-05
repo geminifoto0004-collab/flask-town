@@ -9,6 +9,7 @@ generic rather than gaining story-specific functions.
 
 from . import town_ai_bp as _base
 from .town_ai_director_runtime import DIRECTOR_TOOLS, _fn
+from .town_generic_entity_runtime import inline_visual_schema
 
 
 def _tool_name(tool):
@@ -29,23 +30,28 @@ def _ensure_scene_tool():
             "onDutyAgents, relationships and presence. Never spawn an absent MIA/ANA/LIA. A newly created visitor does NOT automatically "
             "know every officer. If a requested person is absent, improvise a believable alternative without violating mustKeep. Other "
             "characters keep agency: attraction does not force reciprocation, and ANA may reject Oscar even if Oscar pursues her. Include "
-            "the whole ordered scene through its natural ending, plus a short Traditional Chinese summary of what the user asked and what "
+            "the whole ordered scene through its natural ending, plus a short Simplified Chinese summary of what the user asked and what "
             "you changed/optimized as director."
         ),
         {
             "id": {"type": "string", "minLength": 1, "maxLength": 64},
             "name": {"type": "string", "minLength": 1, "maxLength": 28},
             "entityType": {"type": "string", "enum": ["human", "vehicle", "animal", "item", "decoration"]},
+            "semanticType": {"type": "string", "minLength": 1, "maxLength": 40},
             "zone": {"type": "string", "enum": ["office", "office_door", "harbor_walkway", "pier", "sea"]},
             "bodyColor": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
             "accentColor": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
+            "mobility": {"type": "string", "enum": ["walk", "run", "roll", "drive", "swim", "float", "static"]},
+            "visual": inline_visual_schema(),
+            "persistent": {"type": "boolean"},
+            "durationSeconds": {"type": "number", "minimum": 10, "maximum": 300},
             "carrying": {
                 "type": "array", "maxItems": 6,
                 "items": {"type": "string", "minLength": 1, "maxLength": 24},
             },
             "intentSummary": {
                 "type": "string", "minLength": 1, "maxLength": 140,
-                "description": "Concise Traditional Chinese summary of what the administrator basically wants to happen."
+                "description": "Concise Simplified Chinese summary of what the administrator basically wants to happen."
             },
             "mustKeep": {
                 "type": "array", "maxItems": 6,
@@ -59,7 +65,7 @@ def _ensure_scene_tool():
             },
             "directorNote": {
                 "type": "string", "minLength": 1, "maxLength": 180,
-                "description": "Concise Traditional Chinese note explaining the believable adaptation/optimization you chose."
+                "description": "Concise Simplified Chinese note explaining the believable adaptation/optimization you chose."
             },
             "steps": {
                 "type": "array", "minItems": 2, "maxItems": 24,
@@ -86,7 +92,7 @@ def _ensure_scene_tool():
                 },
             },
         },
-        ["id", "name", "entityType", "zone", "intentSummary", "mustKeep", "creativeFreedom", "directorNote", "steps"],
+        ["id", "name", "entityType", "semanticType", "zone", "visual", "intentSummary", "mustKeep", "creativeFreedom", "directorNote", "steps"],
     ))
 
 
@@ -113,9 +119,14 @@ def install_generic_scene_runtime():
                 "id": entity_id,
                 "name": raw.get("name"),
                 "entityType": raw.get("entityType"),
+                "semanticType": raw.get("semanticType") or raw.get("entityType"),
                 "zone": raw.get("zone"),
                 "bodyColor": raw.get("bodyColor"),
                 "accentColor": raw.get("accentColor"),
+                "mobility": raw.get("mobility"),
+                "visual": raw.get("visual"),
+                "persistent": bool(raw.get("persistent", False)),
+                "durationSeconds": raw.get("durationSeconds"),
                 "carrying": raw.get("carrying") if isinstance(raw.get("carrying"), list) else [],
             })
 

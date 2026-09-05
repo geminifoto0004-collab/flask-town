@@ -32,6 +32,7 @@ _SERVER_OWNED_FIELDS = (
     "recentDirectorActions",
     "characterProfiles",
     "characterPresence",
+    "fixtureCounts",
 )
 
 

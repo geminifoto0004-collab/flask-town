@@ -18,7 +18,12 @@ def patch_render_admin_action_feedback(html: str) -> str:
     )
     html = html.replace(
         "log('AI 已收到指令：'+prompt+'（已送出，不必重按）');",
-        "log('AI 已收到劇情種子：'+prompt+'（明確指定的核心會保留，其餘由 AI 導演；超過 15 秒仍會繼續等待，不必重按）');",
+        "log('AI 已收到剧情种子：'+prompt+'（明确指定的核心会保留，其余由 AI 导演；超过 15 秒仍会继续等待，不必重按）');",
+        1,
+    )
+    html = html.replace(
+        "    commandBusy=true;\n    const commandId=",
+        "    commandBusy=true;\n    window.__townPauseLocalLifeUntil=Date.now()+180000;\n    const commandId=",
         1,
     )
 
@@ -46,16 +51,21 @@ def patch_render_admin_action_feedback(html: str) -> str:
         "    }catch(err){\n      log('AI 指令失敗：'+String(err&&err.message||err));\n      setStatus('AI 指令失敗');\n    }finally{\n      if(timer)clearInterval(timer);commandBusy=false;",
         1,
     )
+    html = html.replace(
+        "      setStatus('AI 指令已完成');",
+        "      window.__townPauseLocalLifeUntil=Date.now()+120000;\n      setStatus('AI 指令已完成');",
+        1,
+    )
 
     old = """      if(actions.length)log('AI 真正下令：'+actions.map(a=>String(a.type||'動作')+(a.name?' '+a.name:'')+(a.target?' → '+a.target:'')).join('；'));
       if(data.duplicate)log('這個 command_id 已執行過，本次沒有重複建立物件');"""
-    new = """      if(data.thought)log('AI 導演改編：'+String(data.thought).slice(0,300));
+    new = """      if(data.thought)log('AI 导演改编：'+String(data.thought).slice(0,300));
       if(actions.length){
-        log('AI 真正執行：'+actions.map(a=>String(a.type||'動作')+(a.agent?' '+a.agent:'')+(a.name?' '+a.name:'')+(a.action?' · '+a.action:'')+(a.target?' → '+a.target:'')+(a.group?' · '+a.group:'')).join('；'));
+        log('AI 真正执行：'+actions.map(a=>String(a.type||'动作')+(a.agent?' '+a.agent:'')+(a.name?' '+a.name:'')+(a.action?' · '+a.action:'')+(a.target?' → '+a.target:'')+(a.group?' · '+a.group:'')).join('；'));
         try{
           if(typeof window.__townApplyAiTownActions==='function')window.__townApplyAiTownActions(actions);
-          else log('AI 即時動作橋接尚未就緒，等待共同世界同步');
-        }catch(err){log('AI 即時動作顯示失敗：'+String(err&&err.message||err));}
+          else log('AI 即时动作桥接尚未就绪，等待共同世界同步');
+        }catch(err){log('AI 即时动作显示失败：'+String(err&&err.message||err));}
       }
       const hasGenericSpawn=actions.some(a=>a&&(a.type==='spawn_entity'||a.type==='spawn_from_template'));
       const serverEntities=Array.isArray(data&&data.world&&data.world.genericEntities)?data.world.genericEntities:[];
@@ -64,17 +74,17 @@ def patch_render_admin_action_feedback(html: str) -> str:
           window.__townMergeGenericWorld(data.world);
           if(typeof window.__townInvalidateWorldFetch==='function')window.__townInvalidateWorldFetch();
         }
-      }catch(err){log('共同世界即時同步失敗：'+String(err&&err.message||err));}
+      }catch(err){log('共同世界即时同步失败：'+String(err&&err.message||err));}
       if(hasGenericSpawn){
-        const rendererCount=typeof window.__townGenericEntityCount==='function'?window.__townGenericEntityCount():'未連接';
-        log('共同世界實體：後端 '+serverEntities.length+' / renderer '+rendererCount);
-        if(data.spawn_persistence_repaired)log('生成實體原本未落地，伺服器已自動補寫 TiDB');
+        const rendererCount=typeof window.__townGenericEntityCount==='function'?window.__townGenericEntityCount():'未连接';
+        log('共同世界实体：后端 '+serverEntities.length+' / renderer '+rendererCount);
+        if(data.spawn_persistence_repaired)log('生成实体原本未落地，服务器已自动补写 TiDB');
         if(Array.isArray(data.missing_spawn_ids_after_repair)&&data.missing_spawn_ids_after_repair.length){
-          log('生成實體仍未落地：'+data.missing_spawn_ids_after_repair.join(', '));
+          log('生成实体仍未落地：'+data.missing_spawn_ids_after_repair.join(', '));
         }
-        if(typeof window.__townMergeGenericWorld!=='function')log('generic renderer bridge 未連接');
+        if(typeof window.__townMergeGenericWorld!=='function')log('generic renderer bridge 未连接');
       }
-      if(data.director_note)log('AI 優化：'+String(data.director_note).slice(0,180));
-      if(data.duplicate)log('這個 command_id 已執行過，本次沒有重複建立物件');"""
+      if(data.director_note)log('AI 优化：'+String(data.director_note).slice(0,180));
+      if(data.duplicate)log('这个 command_id 已执行过，本次没有重复建立物件');"""
     html = html.replace(old, new, 1)
     return html

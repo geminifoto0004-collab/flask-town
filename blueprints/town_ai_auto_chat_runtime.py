@@ -165,7 +165,7 @@ def install_auto_chat_runtime():
 The participants are exactly {a} and {b}; do not substitute another permanent character.
 Use the supplied TiDB character profiles, recent dialogue and world state so the conversation feels continuous.
 Produce 4 to 8 turns and alternate naturally between the two speakers.
-For EVERY turn, text must be natural everyday Chilean Spanish and text_zh must be a natural Traditional Chinese translation of the same line.
+For EVERY turn, text must be natural everyday Chilean Spanish and text_zh must be a natural Simplified Chinese translation of the same line.
 Translate catchphrases, idioms and exclamations according to intent, emotional tone and context. Never copy Chinese into the Spanish text field. Do not translate them word for word.
 
 CURRENT TOPIC MODE: {topic_mode}

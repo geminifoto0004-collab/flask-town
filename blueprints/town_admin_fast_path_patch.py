@@ -27,6 +27,7 @@ from . import town_character_director_patch as _director
 from .town_ai_director_runtime import _tool_calls_to_actions
 from .town_character_tidb_runtime import character_context, refresh_runtime_character_bindings
 from .town_current_context_runtime import current_context
+from .town_generic_entity_runtime import distinct_actor_visuals
 
 
 _TZ = ZoneInfo("America/Santiago")
@@ -137,8 +138,46 @@ def install_admin_fast_path_patch():
         raw_actions = _tool_calls_to_actions(message)
         metadata = _admin._scene_metadata(raw_actions)
         actions = _base._validate_actions(raw_actions)
+        if actions and not distinct_actor_visuals(raw_actions):
+            actions = []
+        repair_attempted = False
+        if not actions:
+            # Tool schemas can still be violated by the model (missing visual
+            # parts, invalid semantic type, malformed coordinates, etc.). One
+            # bounded repair call is preferable to exposing no_supported_action
+            # after the administrator already waited for a full response.
+            repair_attempted = True
+            repair_payload = dict(payload)
+            repair_payload["messages"] = list(payload["messages"]) + [
+                {
+                    "role": "user",
+                    "content": (
+                        "ENGINE VALIDATION REPAIR: your previous response produced no executable action. "
+                        "Return tool calls again using only the supplied schemas. Preserve the administrator's exact "
+                        "request. Every distinctive new actor needs nonempty original visual.parts, and each requested "
+                        "thing must be represented exactly once. Different semantic actors must have different part "
+                        "geometry/silhouettes, not the same shape with different colors. Do not answer with prose or unrelated filler."
+                    ),
+                }
+            ]
+            repair_payload["temperature"] = 0.38
+            repair_response = requests.post(
+                "https://api.deepseek.com/chat/completions",
+                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                json=repair_payload,
+                timeout=(4, 30),
+            )
+            if repair_response.ok:
+                repair_choice = (repair_response.json().get("choices") or [{}])[0]
+                if repair_choice.get("finish_reason") != "length":
+                    message = repair_choice.get("message") or {}
+                    raw_actions = _tool_calls_to_actions(message)
+                    metadata = _admin._scene_metadata(raw_actions)
+                    actions = _base._validate_actions(raw_actions)
+                    if actions and not distinct_actor_visuals(raw_actions):
+                        actions = []
         intent = metadata.get("intent_summary") or str(prompt)[:110]
-        note = metadata.get("director_note") or "保留管理員明確指定內容，其餘依 TiDB 人物設定與目前世界自行導演。"
+        note = metadata.get("director_note") or "保留管理员明确指定内容，其余依 TiDB 人物设定与当前世界自行导演。"
 
         return {
             "ok": True,
@@ -149,6 +188,7 @@ def install_admin_fast_path_patch():
             "admin_ai_ms": int((time.monotonic() - started) * 1000),
             "admin_tool_count": len(tools),
             "admin_context_mode": "tidb_stored_only",
+            "admin_validation_repair_attempted": repair_attempted,
             **metadata,
         }
 

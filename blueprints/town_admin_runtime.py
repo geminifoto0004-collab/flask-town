@@ -70,7 +70,7 @@ def _slim_world(world):
     keep = (
         "worldMap", "agents", "onDutyAgents", "nightShiftAgent", "stats",
         "worldObjects", "genericEntities", "seaCreatures", "visitors", "characterProfiles",
-        "recentDialogue", "dialoguePolicy", "relationships", "furniture", "plants", "dogs",
+        "recentDialogue", "dialoguePolicy", "relationships", "furniture", "plants", "dogs", "fixtureCounts",
     )
     return {key: source.get(key) for key in keep if key in source}
 
@@ -253,7 +253,7 @@ def install_town_admin_runtime():
                         action["id"] = f"{command_id}-{index}"[:80]
             decision = {
                 "ok": True,
-                "thought": result.get("thought") or "管理員劇情已轉成可執行世界動作",
+                "thought": result.get("thought") or "管理员剧情已转成可执行世界动作",
                 "actions": actions,
                 "model": result.get("model") or "deepseek-chat",
                 "context": result.get("context") or _base._iquique_context(),

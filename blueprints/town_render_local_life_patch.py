@@ -37,7 +37,7 @@ def patch_render_local_life(html: str) -> str:
 
   function fallbackChat(pair){
     if(!pair||typeof applyAiTownActions!=='function')return false;
-    const lines=[[['¿Cómo va todo?','最近怎麼樣？'],['Bien, aquí seguimos con lo nuestro.','還好，就繼續忙自己的事情。'],['Después conversamos con más calma.','等一下有空再慢慢聊。'],['Ya, dale.','好啊。']],[['¿Vas por un café después?','等一下要去喝咖啡嗎？'],['Puede ser, cuando termine esto.','可以啊，等我把這個弄完。'],['Me avisas entonces.','那你等一下叫我。'],['Sí.','好。']]];
+    const lines=[[['¿Cómo va todo?','最近怎么样？'],['Bien, aquí seguimos con lo nuestro.','还好，就继续忙自己的事情。'],['Después conversamos con más calma.','等一下有空再慢慢聊。'],['Ya, dale.','好啊。']],[['¿Vas por un café después?','等一下要去喝咖啡吗？'],['Puede ser, cuando termine esto.','可以啊，等我把这个弄完。'],['Me avisas entonces.','那你等一下叫我。'],['Sí.','好。']]];
     const p=lines[Math.floor(Math.random()*lines.length)];
     applyAiTownActions([{type:'agent_chat',from:String(pair.a.name),to:String(pair.b.name),turns:[{speaker:String(pair.a.name),text:p[0][0],text_zh:p[0][1]},{speaker:String(pair.b.name),text:p[1][0],text_zh:p[1][1]},{speaker:String(pair.a.name),text:p[2][0],text_zh:p[2][1]},{speaker:String(pair.b.name),text:p[3][0],text_zh:p[3][1]}],localFallback:true}]);
     return true;
@@ -49,6 +49,7 @@ def patch_render_local_life(html: str) -> str:
   }
 
   async function townAiChatTick(){
+    if(Date.now()<Number(window.__townPauseLocalLifeUntil||0))return;
     if(aiChatBusy||typeof applyAiTownActions!=='function')return;
     const live=currentLiveAgents();if(live.length<2)return;
     const pair=pickLocalChatPair(live);if(!pair)return;
@@ -64,6 +65,7 @@ def patch_render_local_life(html: str) -> str:
   }
 
   function townLocalLifeTick(){
+    if(Date.now()<Number(window.__townPauseLocalLifeUntil||0))return;
     if(typeof applyAiTownActions!=='function')return;
     const live=currentLiveAgents();if(!live.length)return;
     const actor=live[Math.floor(Math.random()*live.length)];

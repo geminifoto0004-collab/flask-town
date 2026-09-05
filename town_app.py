@@ -33,6 +33,7 @@ from blueprints.town_officer_scene_runtime import install_officer_scene_runtime
 from blueprints.town_generic_scene_runtime import install_generic_scene_runtime
 from blueprints.town_entity_type_compat_patch import install_entity_type_compat_patch
 from blueprints.town_world_scene_runtime import install_world_scene_runtime
+from blueprints.town_fixture_runtime import install_fixture_runtime
 from blueprints.town_world_tidb_runtime import install_tidb_world_runtime
 from blueprints.town_dialogue_tidb_runtime import install_tidb_dialogue_runtime
 from blueprints.town_ai_auto_chat_runtime import install_auto_chat_runtime
@@ -82,6 +83,7 @@ from blueprints.town_render_dinosaur_patch import patch_render_dinosaurs
 from blueprints.town_render_admin_action_feedback_patch import patch_render_admin_action_feedback
 from blueprints.town_render_local_life_patch import patch_render_local_life
 from blueprints.town_render_character_binding_patch import patch_render_character_bindings
+from blueprints.town_render_fixture_patch import patch_render_fixtures
 
 
 app = Flask(__name__)
@@ -115,6 +117,7 @@ install_action_capacity_patch()
 install_generic_scene_runtime()
 install_entity_type_compat_patch()
 install_world_scene_runtime()
+install_fixture_runtime()
 install_tidb_world_runtime()
 install_tidb_dialogue_runtime()
 
@@ -168,6 +171,7 @@ def _build_cached_town_html():
     html = patch_render_admin_action_feedback(html)
     html = patch_render_local_life(html)
     html = patch_render_character_bindings(html)
+    html = patch_render_fixtures(html)
     return html
 
 

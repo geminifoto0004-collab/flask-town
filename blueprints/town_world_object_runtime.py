@@ -88,7 +88,13 @@ def _ensure_tools():
     if "world_object_spawn" not in names:
         DIRECTOR_TOOLS.append(_fn(
             "world_object_spawn",
-            "Create a visible pixel-art world object. Prefer preset=car/christmas_tree/octopus/seal for those common objects so the shared renderer uses a polished sprite. For other objects, provide safe rectangle parts. Put cars on harbor_walkway, Christmas trees in office, and sea life in sea.",
+            (
+                "Create one visible pixel-art world object. It is temporary and crosses the scene once by default; "
+                "set persistent=true only when the administrator explicitly asks it to remain. Prefer "
+                "preset=car/christmas_tree/octopus/seal for those common objects. For other objects, provide safe "
+                "rectangle parts. Use spawn_entity/world_scene actors instead for a named or interactive distinctive "
+                "character. Put cars on harbor_walkway, Christmas trees in office, and non-interactive sea life in sea."
+            ),
             {
                 "name": {"type": "string", "minLength": 1, "maxLength": 32},
                 "label": {"type": "string", "maxLength": 32},
@@ -98,6 +104,8 @@ def _ensure_tools():
                 "y": {"type": "number", "minimum": 64, "maximum": 388},
                 "behavior": {"type": "string", "enum": sorted(_BEHAVIORS)},
                 "direction": {"type": "integer", "enum": [-1, 1]},
+                "persistent": {"type": "boolean"},
+                "durationSeconds": {"type": "number", "minimum": 10, "maximum": 300},
                 "parts": {
                     "type": "array",
                     "minItems": 1,
@@ -240,6 +248,8 @@ def install_world_object_runtime():
                     "x": pos[0], "y": pos[1],
                     "behavior": behavior,
                     "direction": -1 if int(item.get("direction", 1) or 1) < 0 else 1,
+                    "persistent": bool(item.get("persistent", False)),
+                    "durationSeconds": _number(item.get("durationSeconds"), 10, 300, 35),
                     "parts": parts,
                 })
             elif kind == "world_object_move":
@@ -271,6 +281,7 @@ def install_world_object_runtime():
         cleaned = previous_clean(world)
         source = world if isinstance(world, dict) else {}
         objects = []
+        now_ms = int(time.time() * 1000)
         for item in source.get("worldObjects") if isinstance(source.get("worldObjects"), list) else []:
             if not isinstance(item, dict):
                 continue
@@ -282,6 +293,12 @@ def install_world_object_runtime():
             behavior = str(item.get("behavior") or "static")
             if behavior not in _BEHAVIORS:
                 behavior = "static"
+            created_at = int(item.get("createdAt") or item.get("created_at") or now_ms)
+            persistent = bool(item.get("persistent", False))
+            duration_seconds = _number(item.get("durationSeconds"), 10, 300, 35)
+            expires_at = 0 if persistent else int(item.get("expiresAt") or (created_at + duration_seconds * 1000))
+            if expires_at and expires_at <= now_ms:
+                continue
             objects.append({
                 "id": str(item.get("id") or "")[:80],
                 "preset": preset,
@@ -291,8 +308,13 @@ def install_world_object_runtime():
                 "x": pos[0], "y": pos[1],
                 "behavior": behavior,
                 "direction": -1 if int(item.get("direction", 1) or 1) < 0 else 1,
+                "persistent": persistent,
+                "durationSeconds": duration_seconds,
+                "expiresAt": expires_at,
+                "instanceVersion": int(item.get("instanceVersion") or created_at),
                 "parts": parts,
-                "createdAt": int(item.get("createdAt") or item.get("created_at") or 0),
+                "createdAt": created_at,
+                "updatedAt": int(item.get("updatedAt") or 0),
             })
         cleaned["worldObjects"] = objects[-40:]
         return cleaned
@@ -306,8 +328,15 @@ def install_world_object_runtime():
             kind = action.get("type")
             if kind == "world_object_spawn":
                 object_id = str(action.get("id") or "")[:80]
-                if object_id and not any(str(o.get("id")) == object_id for o in objects):
-                    objects.append({
+                if object_id:
+                    stamp = int(time.time() * 1000)
+                    obj = next((o for o in objects if str(o.get("id")) == object_id), None)
+                    if obj is None:
+                        obj = {"id": object_id}
+                        objects.append(obj)
+                    persistent = bool(action.get("persistent", False))
+                    duration_seconds = _number(action.get("durationSeconds"), 10, 300, 35)
+                    obj.update({
                         "id": object_id,
                         "preset": action.get("preset") or "",
                         "name": action.get("name") or "AI object",
@@ -316,8 +345,13 @@ def install_world_object_runtime():
                         "x": action.get("x"), "y": action.get("y"),
                         "behavior": action.get("behavior") or "static",
                         "direction": action.get("direction", 1),
+                        "persistent": persistent,
+                        "durationSeconds": duration_seconds,
+                        "expiresAt": 0 if persistent else stamp + int(duration_seconds * 1000),
+                        "instanceVersion": stamp,
                         "parts": action.get("parts") or [],
-                        "createdAt": int(time.time() * 1000),
+                        "createdAt": stamp,
+                        "updatedAt": stamp,
                     })
             elif kind == "world_object_move":
                 for obj in objects:
@@ -329,6 +363,8 @@ def install_world_object_runtime():
                         obj["zone"] = zone; obj["x"], obj["y"] = pos
                     if action.get("behavior") in _BEHAVIORS:
                         obj["behavior"] = action.get("behavior")
+                    obj["updatedAt"] = int(time.time() * 1000)
+                    obj["instanceVersion"] = obj["updatedAt"]
                     break
             elif kind == "world_object_remove":
                 objects = [o for o in objects if str(o.get("id")) != str(action.get("id"))]

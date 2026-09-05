@@ -8,10 +8,18 @@ world verbs.  No story names or scenario keywords live here.
 
 from __future__ import annotations
 
+import re
+
 from . import town_ai_bp as _base
 from .town_ai_director_runtime import DIRECTOR_TOOLS, _fn
+from .town_generic_entity_runtime import inline_visual_schema
+from .town_world_object_runtime import _guess_preset
 
 _ZONES = ["office", "office_door", "harbor_walkway", "pier", "sea"]
+
+
+def _identity(value):
+    return re.sub(r"[^0-9a-z\u3400-\u9fff]+", "", str(value or "").strip().lower())[:80]
 
 
 def _tool_name(tool):
@@ -48,7 +56,9 @@ def _ensure_world_scene_tool():
             "Do not reject a concept because there is no bespoke story function: decompose it into actors, objects, "
             "movement, speech, waiting and leaving using the available pixel-world vocabulary. Represent large-scale "
             "ideas at the scale of the current town/map with several coherent visible signs rather than merely narrating them. "
-            "Every requested new actor must appear as its own entry in actors with a distinct id."
+            "Every requested new actor must appear as its own entry in actors with a distinct id. "
+            "Represent each requested thing exactly once: never put the same creature in both actors and objects. "
+            "Distinctive actors require an original visual pixel blueprint; two colors on the generic animal are not enough."
         ),
         {
             "intentSummary": {"type": "string", "minLength": 1, "maxLength": 180},
@@ -61,15 +71,20 @@ def _ensure_world_scene_tool():
                         "id": {"type": "string", "minLength": 1, "maxLength": 64},
                         "name": {"type": "string", "minLength": 1, "maxLength": 40},
                         "entityType": {"type": "string", "minLength": 1, "maxLength": 32},
+                        "semanticType": {"type": "string", "minLength": 1, "maxLength": 40},
                         "zone": {"type": "string", "enum": _ZONES},
                         "x": {"type": "number", "minimum": 12, "maximum": 628},
                         "y": {"type": "number", "minimum": 60, "maximum": 390},
                         "bodyColor": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
                         "accentColor": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
+                        "mobility": {"type": "string", "enum": ["walk", "run", "roll", "drive", "swim", "float", "static"]},
+                        "visual": inline_visual_schema(),
+                        "persistent": {"type": "boolean"},
+                        "durationSeconds": {"type": "number", "minimum": 10, "maximum": 300},
                         "carrying": {"type": "array", "maxItems": 8, "items": {"type": "string", "maxLength": 24}},
                         "steps": {"type": "array", "maxItems": 16, "items": actor_step},
                     },
-                    "required": ["id", "name", "entityType", "zone"],
+                    "required": ["id", "name", "entityType", "semanticType", "zone", "visual"],
                     "additionalProperties": False,
                 },
             },
@@ -84,6 +99,8 @@ def _ensure_world_scene_tool():
                         "x": {"type": "number", "minimum": 12, "maximum": 628},
                         "y": {"type": "number", "minimum": 60, "maximum": 390},
                         "behavior": {"type": "string", "maxLength": 32},
+                        "persistent": {"type": "boolean"},
+                        "durationSeconds": {"type": "number", "minimum": 10, "maximum": 300},
                         "parts": {
                             "type": "array", "maxItems": 24,
                             "items": {
@@ -123,6 +140,23 @@ def install_world_scene_runtime():
                 expanded.append(raw)
                 continue
 
+            actor_ids = set()
+            actor_presets = set()
+            actor_identities = set()
+            for actor in raw.get("actors") if isinstance(raw.get("actors"), list) else []:
+                if not isinstance(actor, dict):
+                    continue
+                aid = str(actor.get("id") or "").strip()[:64]
+                if aid:
+                    actor_ids.add(aid)
+                for value in (actor.get("name"), actor.get("semanticType")):
+                    identity = _identity(value)
+                    if identity:
+                        actor_identities.add((identity, str(actor.get("zone") or "")))
+                preset = _guess_preset(f"{actor.get('name', '')} {actor.get('semanticType', '')} {actor.get('entityType', '')}")
+                if preset:
+                    actor_presets.add((preset, str(actor.get("zone") or "")))
+
             for actor in raw.get("actors") if isinstance(raw.get("actors"), list) else []:
                 if not isinstance(actor, dict):
                     continue
@@ -134,9 +168,14 @@ def install_world_scene_runtime():
                     "id": aid,
                     "name": actor.get("name") or aid,
                     "entityType": actor.get("entityType") or "creature",
+                    "semanticType": actor.get("semanticType") or actor.get("entityType") or "creature",
                     "zone": actor.get("zone") or "harbor_walkway",
                     "bodyColor": actor.get("bodyColor"),
                     "accentColor": actor.get("accentColor"),
+                    "mobility": actor.get("mobility"),
+                    "visual": actor.get("visual"),
+                    "persistent": bool(actor.get("persistent", False)),
+                    "durationSeconds": actor.get("durationSeconds"),
                     "carrying": actor.get("carrying") if isinstance(actor.get("carrying"), list) else [],
                 }
                 if actor.get("x") is not None:
@@ -178,14 +217,22 @@ def install_world_scene_runtime():
                 for obj in raw.get("objects") if isinstance(raw.get("objects"), list) else []:
                     if not isinstance(obj, dict):
                         continue
+                    object_id = str(obj.get("id") or "").strip()[:64]
+                    preset = _guess_preset(obj.get("label"))
+                    zone = str(obj.get("zone") or "")
+                    object_identity = _identity(obj.get("label"))
+                    if object_id in actor_ids or (preset and (preset, zone) in actor_presets) or (object_identity and (object_identity, zone) in actor_identities):
+                        continue
                     expanded.append({
                         "type": "world_object_spawn",
-                        "id": obj.get("id"),
+                        "id": object_id,
                         "label": obj.get("label"),
-                        "zone": obj.get("zone"),
+                        "zone": zone,
                         "x": obj.get("x"),
                         "y": obj.get("y"),
                         "behavior": obj.get("behavior") or "static",
+                        "persistent": bool(obj.get("persistent", False)),
+                        "durationSeconds": obj.get("durationSeconds"),
                         "parts": obj.get("parts") if isinstance(obj.get("parts"), list) else [],
                     })
                     if len(expanded) >= 96:

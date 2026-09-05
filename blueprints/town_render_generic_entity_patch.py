@@ -96,9 +96,9 @@ def patch_render_generic_entities(html: str) -> str:
     if(step.type==='say')e.speech='';
     if(step.type==='give'){
       const item=String(step.item||'物品');e.carrying=e.carrying.filter(v=>v!==item);
-      eventLog(e.name+' 把 '+item+' 交給 '+String(step.target||'對方'));
+      eventLog(e.name+' 把 '+item+' 交给 '+String(step.target||'对方'));
     }
-    if(step.type==='leave'){hidden.add(e.id);eventLog(e.name+' 離開了');}
+    if(step.type==='leave'){hidden.add(e.id);eventLog(e.name+' 离开了');}
     e.current=null;
   }
   function tick(e,dt){
@@ -137,7 +137,21 @@ def patch_render_generic_entities(html: str) -> str:
   function drawVehicle(e){
     const x=e.x,y=e.y,body=e.bodyColor||'#b74747';px(x-20,y-8,40,13,body);px(x-11,y-14,23,7,'#d5e7ed');px(x-16,y-5,6,5,'#f1d45b');px(x-15,y+4,8,6,'#20282e');px(x+8,y+4,8,6,'#20282e');label(e.name,x,y);
   }
-  function drawAnimal(e){const x=e.x,y=e.y,body=e.bodyColor||'#788890';px(x-11,y-5,22,10,body);px(x+7,y-10,9,9,body);px(x+12,y-7,2,2,'#182126');px(x-13,y-2,5,4,e.accentColor||'#58666d');label(e.name,x,y);}
+  function drawAnimal(e){
+    const x=e.x,y=e.y,body=e.bodyColor||'#788890',accent=e.accentColor||'#58666d';
+    if(e.preset==='octopus'){
+      const wave=Math.round(Math.sin((e.walkPhase||performance.now()/180))*2);
+      px(x-11,y-13,22,16,body);px(x-7,y-18,14,7,accent);
+      [-9,-3,3,9].forEach((dx,i)=>px(x+dx-2,y+1,4,13+((i+wave+4)%3)*2,accent));
+      px(x-6,y-10,4,4,'#f2f0eb');px(x+3,y-10,4,4,'#f2f0eb');px(x-5,y-9,2,2,'#1d2430');px(x+4,y-9,2,2,'#1d2430');
+      label(e.name,x,y);bubble(e);return;
+    }
+    if(e.preset==='seal'){
+      px(x-14,y-5,28,9,body);px(x-10,y-9,20,5,accent);px(x+10,y-11,10,10,body);px(x+17,y-8,5,4,accent);px(x+15,y-9,2,2,'#172126');px(x-10,y+3,8,5,accent);px(x+2,y+3,8,5,accent);
+      label(e.name,x,y);bubble(e);return;
+    }
+    px(x-11,y-5,22,10,body);px(x+7,y-10,9,9,body);px(x+12,y-7,2,2,'#182126');px(x-13,y-2,5,4,accent);label(e.name,x,y);bubble(e);
+  }
   function drawItem(e){const x=e.x,y=e.y;px(x-8,y-8,16,16,e.bodyColor||'#c99548');px(x-5,y-5,10,10,e.accentColor||'#efd17a');label(e.name,x,y);}
   function draw(e){if(hidden.has(e.id))return;if(e.entityType==='vehicle')drawVehicle(e);else if(e.entityType==='animal')drawAnimal(e);else if(e.entityType==='item'||e.entityType==='decoration')drawItem(e);else drawHuman(e);}
 
@@ -146,10 +160,14 @@ def patch_render_generic_entities(html: str) -> str:
     agents.forEach(a=>{const name=String(a&&a.name||a&&a.slot||'').toUpperCase();if(!name)return;const fb=officerFallback[name];officerPos.set(name,{x:Number(a&&a.x)||(fb&&fb.x)||320,y:Number(a&&a.y)||(fb&&fb.y)||236});});
     const incoming=Array.isArray(world&&world.genericEntities)?world.genericEntities:[];
     incoming.forEach(raw=>{
-      const id=String(raw&&raw.id||'');if(!id||hidden.has(id))return;
+      const id=String(raw&&raw.id||'');if(!id)return;
+      if(Number(raw&&raw.expiresAt)>0&&Number(raw.expiresAt)<=Date.now()){entities.delete(id);hidden.delete(id);return;}
       let e=entities.get(id);
-      if(!e){e={id,name:String(raw.name||id),entityType:String(raw.entityType||'human'),zone:String(raw.zone||''),x:Number(raw.x)||320,y:Number(raw.y)||292,bodyColor:raw.bodyColor,accentColor:raw.accentColor,carrying:Array.isArray(raw.carrying)?raw.carrying.slice():[],queue:[],current:null,done:new Set(),speech:'',walkPhase:0};entities.set(id,e);}
-      e.name=String(raw.name||e.name);e.entityType=String(raw.entityType||e.entityType);e.bodyColor=raw.bodyColor||e.bodyColor;e.accentColor=raw.accentColor||e.accentColor;
+      const version=Number(raw.instanceVersion||raw.createdAt||0);
+      if(e&&version&&version!==Number(e.instanceVersion||0)){entities.delete(id);hidden.delete(id);e=null;}
+      if(hidden.has(id))return;
+      if(!e){e={id,name:String(raw.name||id),entityType:String(raw.entityType||'human'),semanticType:String(raw.semanticType||''),preset:String(raw.preset||''),zone:String(raw.zone||''),x:Number(raw.x)||320,y:Number(raw.y)||292,bodyColor:raw.bodyColor,accentColor:raw.accentColor,carrying:Array.isArray(raw.carrying)?raw.carrying.slice():[],templateId:String(raw.templateId||''),visual:raw.visual||null,capabilities:Array.isArray(raw.capabilities)?raw.capabilities.slice():[],mobility:String(raw.mobility||''),expiresAt:Number(raw.expiresAt)||0,instanceVersion:version,facing:'down',queue:[],current:null,done:new Set(),speech:'',walkPhase:0};entities.set(id,e);}
+      e.name=String(raw.name||e.name);e.entityType=String(raw.entityType||e.entityType);e.semanticType=String(raw.semanticType||e.semanticType||'');e.preset=String(raw.preset||e.preset||'');e.bodyColor=raw.bodyColor||e.bodyColor;e.accentColor=raw.accentColor||e.accentColor;e.templateId=String(raw.templateId||e.templateId||'');e.visual=raw.visual||e.visual||null;e.capabilities=Array.isArray(raw.capabilities)?raw.capabilities.slice():e.capabilities;e.mobility=String(raw.mobility||e.mobility||'');e.expiresAt=Number(raw.expiresAt)||0;e.instanceVersion=version||e.instanceVersion;
       if(!e.current&&!e.queue.length&&Number.isFinite(Number(raw.x))&&Number.isFinite(Number(raw.y))){e.x=Number(raw.x);e.y=Number(raw.y);}
       const queued=new Set(e.queue.map(stepId));if(e.current)queued.add(stepId(e.current));
       (Array.isArray(raw.script)?raw.script:[]).forEach(step=>{const sid=stepId(step);if(sid&&!e.done.has(sid)&&!queued.has(sid)){e.queue.push({...step});queued.add(sid);}});
@@ -174,6 +192,7 @@ def patch_render_generic_entities(html: str) -> str:
   window.__townSceneLayers.push((dt)=>{
     const items=[];
     entities.forEach(e=>{
+      if(e.expiresAt>0&&e.expiresAt<=Date.now()){entities.delete(e.id);hidden.delete(e.id);return;}
       tick(e,dt);
       if(e.current&&(e.current.type==='say'||e.current.type==='interact_entity')&&(e.current.text||e.current.text_zh))e.speech=window.TownLanguage.text(e.current);
       if(!hidden.has(e.id))items.push({y:e.y+14,draw:()=>draw(e)});

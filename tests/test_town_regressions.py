@@ -75,6 +75,22 @@ class BrowserBuildTests(unittest.TestCase):
         self.assertIn("a.__townSpeechTurn=turn", self.html)
         self.assertIn('templateId:String(raw.templateId', self.html)
 
+    def test_inline_visuals_and_temporary_lifecycle_are_wired(self):
+        self.assertIn('function drawTemplate(e)', self.html)
+        self.assertIn("semanticType:String(raw.semanticType||'')", self.html)
+        self.assertIn('e.visual=raw.visual||e.visual||null', self.html)
+        self.assertIn('if(e.expiresAt>0&&e.expiresAt<=Date.now())', self.html)
+        self.assertIn('if(o.persistent)o.x=o.x<b.l?b.r:b.l', self.html)
+        self.assertIn('else o.finished=true', self.html)
+        self.assertIn('x:same?Number(old.x||0)', self.html)
+
+    def test_native_computer_count_is_world_controlled(self):
+        desk=function(self.html,'drawDesk')
+        self.assertIn('deskIndex<Number(townFixtureCounts.computer||0)', desk)
+        self.assertIn('if(showComputer)', desk)
+        self.assertIn("registerDirectorTool('set_fixture_count'", self.html)
+        self.assertIn('applyTownFixtureCounts(world)', function(self.html,'applyServerWorld'))
+
     def test_generic_actor_recovers_from_blocked_spawn_and_walks(self):
         generic=re.search(r'<script id="town-generic-entity-runtime">(.*?)</script>',self.html,re.S).group(1)
         script='\n'.join(function(generic,n) for n in ['routeFor','moveToward'])
@@ -147,6 +163,35 @@ class BrowserBuildTests(unittest.TestCase):
 
 
 class BackendTests(unittest.TestCase):
+    def test_inline_visual_blueprint_is_sanitized(self):
+        from blueprints.town_generic_entity_runtime import _clean_inline_visual, distinct_actor_visuals
+        visual=_clean_inline_visual({'scale':9,'facing':'sideways','parts':[
+            {'shape':'ellipse','x':0,'y':-12,'w':20,'h':22,'color':'#ffcc00','layer':2,
+             'motion':{'on':'always','dx':99,'dy':2,'period':0}},
+            {'shape':'script','x':0,'y':0,'w':2,'h':2,'color':'#ffffff'},
+        ]})
+        self.assertEqual(visual['scale'],3.0)
+        self.assertEqual(visual['facing'],'down')
+        self.assertEqual(len(visual['parts']),1)
+        self.assertEqual(visual['parts'][0]['motion']['dx'],20)
+        self.assertEqual(visual['parts'][0]['motion']['period'],0.2)
+        same=[{'shape':'rect','x':i,'y':-5,'w':3,'h':8,'color':'#ffff00'} for i in range(6)]
+        recolor=[{**part,'color':'#ff6600'} for part in same]
+        self.assertFalse(distinct_actor_visuals([{'type':'world_scene','actors':[
+            {'name':'A','semanticType':'electric_mouse','visual':{'parts':same}},
+            {'name':'B','semanticType':'winged_dragon','visual':{'parts':recolor}},
+        ]}]))
+        recolor[0]['w']=9
+        self.assertTrue(distinct_actor_visuals([{'type':'world_scene','actors':[
+            {'name':'A','semanticType':'electric_mouse','visual':{'parts':same}},
+            {'name':'B','semanticType':'winged_dragon','visual':{'parts':recolor}},
+        ]}]))
+
+    def test_fixture_counts_are_bounded(self):
+        from blueprints.town_fixture_runtime import _clean_counts
+        self.assertEqual(_clean_counts({'computer':99}),{'computer':3})
+        self.assertEqual(_clean_counts({'computer':-5}),{'computer':0})
+
     def test_translation_endpoint_limits_and_cache(self):
         from flask import Flask
         from blueprints import town_dialogue_translation as module

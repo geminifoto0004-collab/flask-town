@@ -28,7 +28,7 @@ def _world_context(world):
         "worldMap", "agents", "onDutyAgents", "nightShiftAgent", "stats",
         "worldObjects", "genericEntities", "seaCreatures", "visitors", "characterProfiles",
         "recentDialogue", "dialoguePolicy", "relationships", "furniture", "plants", "dogs",
-        "recentDirectorActions",
+        "recentDirectorActions", "fixtureCounts",
     )
     return {key: source.get(key) for key in keep if key in source}
 
@@ -75,7 +75,7 @@ WORLD DIRECTION:
 - Respect current onDutyAgents and nightShiftAgent. Do not make an off-duty core officer physically act in the office.
 - Ship/customs work has priority when active work exists.
 - Read recentDialogue and recentDirectorActions to avoid repetitive loops.
-- Dialogue should be natural everyday Chilean Spanish; when translation fields exist, also provide natural Traditional Chinese.
+- Dialogue should be natural everyday Chilean Spanish; when translation fields exist, also provide natural Simplified Chinese.
 - Relationships and reactions are not forced merely by gender, age, family state or attraction.
 - Use world state and the database character configuration rather than hard-coded character assumptions.
 - Never output JavaScript, SQL, shell commands, URLs, secrets or executable code.

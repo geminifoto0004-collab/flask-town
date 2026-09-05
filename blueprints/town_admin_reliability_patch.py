@@ -99,15 +99,20 @@ ARBITRARY WORLD DIRECTION — CORE DESIGN RULE:
 - A large concept is NOT a reason to answer with prose only. Stage the parts that can be represented inside the current town/map. Scale a city/world-level event down to visible local consequences in this Iquique customs-office world while preserving the administrator's requested core idea.
 - If an exact visual form is unavailable, approximate it with the available generic entity/template/pixel-object primitives rather than silently dropping the event.
 - Do not require the administrator to know tool names. Inferring the best executable representation is YOUR job as director.
+- Do not add unrelated filler actions merely to make the scene busy. A manual instruction has priority over autonomous small talk.
 
 EXECUTABLE REPRESENTATION AUDIT — HARD RULES:
 - One spawn_entity, spawn_from_template, or entity_scene represents exactly ONE newly created actor/entity. world_scene may contain many actors, but every actor entry still compiles to its own creation action.
+- Represent every requested visible thing exactly once. Never create the same named creature as both a generic actor and a world object.
+- A distinctive or fictional actor must include a nonempty original visual.parts blueprint that reflects its silhouette and key features. A recolored generic dog is not a successful representation.
+- New scene actors/objects are temporary unless the administrator explicitly asks them to remain, stay permanently, or become part of the persistent world.
+- Exact quantities of built-in fixtures must use set_fixture_count. For example, "only one computer remains" means set computer count to 1; a mover saying it happened is not execution.
 - If the administrator explicitly requests N new actors/entities, emit N distinct actor/creation entries with distinct stable ids. Never satisfy quantity only in intentSummary, directorNote, prose, or dialogue.
 - A sentence saying somebody arrived/appeared/entered is NOT execution. Every newly appearing person, animal, creature, vehicle, item or decoration must have a corresponding executable creation representation.
 - Causative arrival language such as 叫/請/讓/邀請 X 來/過來/進來 also REQUIRES an executable creation representation for X unless X already exists in the current world.
 - entity_scene is one actor's complete scene. For multiple actors or a broad event, prefer world_scene.
 - Before finishing, compare the requested visible facts against your tool calls and add any missing representation IN THIS SAME RESPONSE.
-- There will be no second model retry for a missing spawn. The first response must be executable and complete.
+- The engine may request one repair response if validation rejects the first tool call; make the first response executable and complete anyway.
 """
 
     _director._system_prompt = system_prompt
@@ -128,7 +133,7 @@ EXECUTABLE REPRESENTATION AUDIT — HARD RULES:
             "actions": [],
             "model": (result or {}).get("model") if isinstance(result, dict) else "",
             "context": (result or {}).get("context") if isinstance(result, dict) else {},
-            "thought": "AI 沒有產生可執行的實體生成指令，因此本輪不宣告場景成功。",
+            "thought": "AI 没有产生可执行的实体生成指令，因此本轮不宣告场景成功。",
             "error": "missing_executable_spawn",
         }
 

@@ -270,6 +270,8 @@ def _ensure_tools():
                 "x": {"type": "number", "minimum": 12, "maximum": 628},
                 "y": {"type": "number", "minimum": 60, "maximum": 390},
                 "carrying": {"type": "array", "maxItems": 8, "items": {"type": "string", "maxLength": 24}},
+                "persistent": {"type": "boolean"},
+                "durationSeconds": {"type": "number", "minimum": 10, "maximum": 300},
             },
             ["templateId", "id", "zone"],
         ))
@@ -349,6 +351,8 @@ def install_entity_template_runtime():
                         "type": kind, "templateId": tid, "id": entity_id,
                         "name": _text(item.get("name"), 80), "zone": zone,
                         "x": item.get("x"), "y": item.get("y"),
+                        "persistent": bool(item.get("persistent", False)),
+                        "durationSeconds": _number(item.get("durationSeconds"), 10, 300, 45),
                         "carrying": [_text(v, 24) for v in (item.get("carrying") if isinstance(item.get("carrying"), list) else []) if _text(v, 24)][:8],
                     })
                 continue
@@ -409,9 +413,15 @@ def install_entity_template_runtime():
             accent = palette.get("accent") or palette.get("secondary") or "#d2a85e"
             spawn = {
                 "type": "spawn_entity", "id": action["id"],
+                "templateId": action["templateId"],
                 "name": action.get("name") or template.get("name") or action["id"],
                 "entityType": "animal" if template["entityKind"] in {"animal", "creature"} else (template["entityKind"] if template["entityKind"] in {"human", "vehicle", "item", "decoration"} else "decoration"),
+                "semanticType": template["entityKind"],
                 "zone": action["zone"], "bodyColor": body, "accentColor": accent,
+                "mobility": template.get("mobility") or "walk",
+                "visual": template.get("visual") or {},
+                "persistent": bool(action.get("persistent", False)),
+                "durationSeconds": action.get("durationSeconds") or 45,
                 "carrying": action.get("carrying") or [],
             }
             if action.get("x") is not None:
