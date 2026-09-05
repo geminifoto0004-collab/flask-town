@@ -41,8 +41,8 @@ def patch_render_template_composer(html: str) -> str:
     if marker in html:
         html = html.replace(marker, replacement, 1)
 
-    create_marker = "if(!e){e={id,name:String(raw.name||id),entityType:String(raw.entityType||'human'),zone:String(raw.zone||''),x:Number(raw.x)||320,y:Number(raw.y)||292,bodyColor:raw.bodyColor,accentColor:raw.accentColor,carrying:Array.isArray(raw.carrying)?raw.carrying.slice():[],queue:[],current:null,done:new Set(),speech:''};entities.set(id,e);}"
-    create_replacement = "if(!e){e={id,name:String(raw.name||id),entityType:String(raw.entityType||'human'),zone:String(raw.zone||''),x:Number(raw.x)||320,y:Number(raw.y)||292,bodyColor:raw.bodyColor,accentColor:raw.accentColor,carrying:Array.isArray(raw.carrying)?raw.carrying.slice():[],templateId:String(raw.templateId||''),visual:raw.visual||null,capabilities:Array.isArray(raw.capabilities)?raw.capabilities.slice():[],mobility:String(raw.mobility||''),facing:'down',queue:[],current:null,done:new Set(),speech:''};entities.set(id,e);}"
+    create_marker = "if(!e){e={id,name:String(raw.name||id),entityType:String(raw.entityType||'human'),zone:String(raw.zone||''),x:Number(raw.x)||320,y:Number(raw.y)||292,bodyColor:raw.bodyColor,accentColor:raw.accentColor,carrying:Array.isArray(raw.carrying)?raw.carrying.slice():[],queue:[],current:null,done:new Set(),speech:'',walkPhase:0};entities.set(id,e);}"
+    create_replacement = "if(!e){e={id,name:String(raw.name||id),entityType:String(raw.entityType||'human'),zone:String(raw.zone||''),x:Number(raw.x)||320,y:Number(raw.y)||292,bodyColor:raw.bodyColor,accentColor:raw.accentColor,carrying:Array.isArray(raw.carrying)?raw.carrying.slice():[],templateId:String(raw.templateId||''),visual:raw.visual||null,capabilities:Array.isArray(raw.capabilities)?raw.capabilities.slice():[],mobility:String(raw.mobility||''),facing:'down',queue:[],current:null,done:new Set(),speech:'',walkPhase:0};entities.set(id,e);}"
     if create_marker in html:
         html = html.replace(create_marker, create_replacement, 1)
 
@@ -51,8 +51,8 @@ def patch_render_template_composer(html: str) -> str:
     if merge_marker in html:
         html = html.replace(merge_marker, merge_replacement, 1)
 
-    move_marker = "const dx=p.x-e.x,dy=p.y-e.y,d=Math.hypot(dx,dy);if(d<2){e.x=p.x;e.y=p.y;return true;}\n    const step=Math.min(d,Math.max(10,speed)*dt);e.x+=dx/d*step;e.y+=dy/d*step;return false;"
-    move_replacement = "const dx=p.x-e.x,dy=p.y-e.y,d=Math.hypot(dx,dy);if(d<2){e.x=p.x;e.y=p.y;return true;}\n    if(Math.abs(dx)>Math.abs(dy))e.facing=dx<0?'left':'right';else e.facing=dy<0?'up':'down';\n    const step=Math.min(d,Math.max(10,speed)*dt);e.x+=dx/d*step;e.y+=dy/d*step;return false;"
+    move_marker = "const dx=p.x-e.x,dy=p.y-e.y,d=Math.hypot(dx,dy);if(d<2){e.x=p.x;e.y=p.y;return true;}\n    const step=Math.min(d,Math.max(10,speed)*dt);e.x+=dx/d*step;e.y+=dy/d*step;e.walkPhase=(e.walkPhase||0)+step*.28;return false;"
+    move_replacement = "const dx=p.x-e.x,dy=p.y-e.y,d=Math.hypot(dx,dy);if(d<2){e.x=p.x;e.y=p.y;return true;}\n    if(Math.abs(dx)>Math.abs(dy))e.facing=dx<0?'left':'right';else e.facing=dy<0?'up':'down';\n    const step=Math.min(d,Math.max(10,speed)*dt);e.x+=dx/d*step;e.y+=dy/d*step;e.walkPhase=(e.walkPhase||0)+step*.28;return false;"
     if move_marker in html:
         html = html.replace(move_marker, move_replacement, 1)
 

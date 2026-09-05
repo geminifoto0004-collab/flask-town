@@ -63,6 +63,8 @@ class BrowserBuildTests(unittest.TestCase):
 
     def test_bilingual_history_and_scene_wiring(self):
         self.assertNotIn("document.getElementById('dialogueLangSelect')", self.html)
+        self.assertIn('id="town-language-summary"', self.html)
+        self.assertIn('简体中文', self.html)
         self.assertIn('speaker.__townSpeechTurn={...turn}', self.html)
         self.assertIn('const liveDialogue=', self.html)
         self.assertNotIn('window.__townDialogueHistory.push({at:Date.now(),members:[from.name,to.name]', self.html)
@@ -71,6 +73,27 @@ class BrowserBuildTests(unittest.TestCase):
         self.assertIn('Math.sin(performance.now()/1000', self.html)
         self.assertIn("registerDirectorTool('agent_say'", self.html)
         self.assertIn("a.__townSpeechTurn=turn", self.html)
+        self.assertIn('templateId:String(raw.templateId', self.html)
+
+    def test_generic_actor_recovers_from_blocked_spawn_and_walks(self):
+        generic=re.search(r'<script id="town-generic-entity-runtime">(.*?)</script>',self.html,re.S).group(1)
+        script='\n'.join(function(generic,n) for n in ['routeFor','moveToward'])
+        node(r"""
+          const vm=require('vm'),assert=require('assert'),fs=require('fs');
+          const context={window:{
+            __townPointBlocked:(x,y)=>x===100&&y===100,
+            __townSafeGoal:()=>({x:120,y:120}),
+            __townFindPath:(sx,sy,tx,ty)=>[{x:tx,y:ty}]
+          },Math};
+          vm.createContext(context);vm.runInContext(JSON.parse(fs.readFileSync(0,'utf8')),context);
+          const actor={x:100,y:100,mobility:'walk',walkPhase:0};
+          const route=context.routeFor(actor,200,200);
+          assert.deepEqual([actor.x,actor.y],[120,120]);
+          assert.equal(route.length,1);
+          context.moveToward(actor,route[0],40,.5);
+          assert(actor.x>120&&actor.y>120,'actor did not move');
+          assert(actor.walkPhase>0,'walking animation did not advance');
+        """, script)
 
     def test_language_switch_never_mutates_source(self):
         node(r"""

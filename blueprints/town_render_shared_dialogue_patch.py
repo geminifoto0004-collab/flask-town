@@ -12,10 +12,13 @@ def patch_render_shared_dialogue(html: str) -> str:
 #town-side-panel>.panel-title,#town-side-panel>.panel-sub{display:block!important}
 #town-side-panel{padding-top:10px!important}
 #town-side-panel>#town-dialogue-list{flex:1 1 auto!important;min-height:0!important}
-#town-inline-language-row{display:flex!important;align-items:center!important;gap:8px!important;margin:0!important;padding:0!important;border:0!important;flex:0 0 auto!important}
-#town-inline-language-row label{display:flex!important;flex-direction:row!important;align-items:center!important;gap:5px!important;font-size:12px!important;color:inherit!important}
-#town-inline-language-row select{min-height:44px!important;padding:7px 9px!important;background:light-dark(#f4efe3,#202936)!important;color:inherit!important;border:2px solid light-dark(#655d50,#3c4657)!important;font:inherit!important;font-weight:700!important}
-@media(max-width:700px){#town-inline-language-row{width:100%;flex-wrap:wrap}}
+#town-inline-language-row{display:grid!important;grid-template-columns:1fr 1fr!important;gap:8px!important;margin:0!important;padding:0!important;border:0!important;flex:0 0 auto!important}
+#town-inline-language-row label{display:flex!important;flex-direction:column!important;align-items:stretch!important;gap:6px!important;min-width:0!important;padding:8px!important;background:#111922!important;border:1px solid #3d5368!important;border-radius:8px!important;font-size:12px!important;font-weight:700!important;color:#dbeaff!important}
+#town-inline-language-row select{display:block!important;width:100%!important;min-height:42px!important;padding:7px 30px 7px 10px!important;background:#25384a!important;color:#fff!important;border:2px solid #77a8d4!important;border-radius:7px!important;font:inherit!important;font-size:14px!important;font-weight:800!important;color-scheme:dark!important;opacity:1!important;-webkit-text-fill-color:#fff!important}
+#town-inline-language-row select:focus{outline:3px solid rgba(102,184,255,.35)!important;outline-offset:1px!important}
+#town-inline-language-row select option{background:#182532!important;color:#fff!important}
+#town-language-summary{flex:0 0 auto;padding:7px 9px;border-radius:7px;background:#263b4d;color:#dceeff;font-size:12px;font-weight:700;text-align:center;border:1px solid #42627d}
+@media(max-width:700px){#town-inline-language-row{width:100%;grid-template-columns:1fr!important}}
 </style>
 '''
     js = r'''

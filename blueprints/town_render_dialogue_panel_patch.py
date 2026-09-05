@@ -112,11 +112,12 @@ def patch_render_dialogue_panel(html: str) -> str:
     panel.id='town-side-panel';
     panel.innerHTML=''
       +'<div class="panel-title">IQUIQUE · AI DIALOGUE</div>'
-      +'<div class="panel-sub">對話顯示在右側；像聊天視窗一樣清楚。下方狀態可切換中文 / Español。</div>'
+      +'<div class="panel-sub">对话显示在右侧；可分别切换对话和状态语言。</div>'
       +'<div class="panel-row">'
-      +'<label>對話 / Diálogo<select id="town-dialogue-lang"><option value="es">Español</option><option value="zh">中文</option></select></label>'
-      +'<label>狀態 / Estado<select id="town-status-lang"><option value="zh">中文</option><option value="es">Español</option></select></label>'
+      +'<label>对话语言 / Diálogo<select id="town-dialogue-lang" aria-label="对话语言"><option value="zh">简体中文</option><option value="es">Español</option></select></label>'
+      +'<label>状态语言 / Estado<select id="town-status-lang" aria-label="状态语言"><option value="zh">简体中文</option><option value="es">Español</option></select></label>'
       +'</div>'
+      +'<div id="town-language-summary" aria-live="polite"></div>'
       +'<div id="town-dialogue-list"></div>';
     const root=findTownRootNode();
     let dock=document.getElementById('town-dock-layout');
@@ -130,15 +131,20 @@ def patch_render_dialogue_panel(html: str) -> str:
     dock.appendChild(panel);
     const dialogueSel=panel.querySelector('#town-dialogue-lang');
     const statusSel=panel.querySelector('#town-status-lang');
+    const languageSummary=panel.querySelector('#town-language-summary');
+    const refreshLanguageSummary=()=>{
+      if(languageSummary)languageSummary.textContent='当前：对话 '+(dialogueSel.value==='zh'?'简体中文':'Español')+' · 状态 '+(statusSel.value==='zh'?'简体中文':'Español');
+    };
     dialogueSel.value=(window.__townUiPrefs||{}).dialogueLang||'es';
     statusSel.value=(window.__townUiPrefs||{}).statusLang||'zh';
-    dialogueSel.addEventListener('change',()=>{window.__townUiPrefs.dialogueLang=dialogueSel.value;saveTownUiPrefs();window.dispatchEvent(new Event('town-language-change'));});
+    refreshLanguageSummary();
+    dialogueSel.addEventListener('change',()=>{window.__townUiPrefs.dialogueLang=dialogueSel.value;saveTownUiPrefs();refreshLanguageSummary();window.dispatchEvent(new Event('town-language-change'));});
     window.addEventListener('town-language-change',()=>{
       agents.forEach(a=>{if(a.chatText&&a.__townSpeechTurn)a.chatText=dialogueText(a.__townSpeechTurn);});
       refreshTownLogLanguage();
       renderDialogueSidebar();
     });
-    statusSel.addEventListener('change',()=>{window.__townUiPrefs.statusLang=statusSel.value;saveTownUiPrefs();if(typeof addLog==='function')addLog(statusSel.value==='es'?'Idioma del registro cambiado a Español':'狀態列語言已切換為中文');refreshTownLogLanguage();});
+    statusSel.addEventListener('change',()=>{window.__townUiPrefs.statusLang=statusSel.value;saveTownUiPrefs();refreshLanguageSummary();if(typeof addLog==='function')addLog(statusSel.value==='es'?'Idioma del registro cambiado a Español':'状态语言已切换为简体中文');refreshTownLogLanguage();});
     setTimeout(syncTownDialoguePanelHeight,0);
     if('ResizeObserver' in window){
       const game=document.querySelector('#customs-sim .game-wrap');

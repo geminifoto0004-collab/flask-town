@@ -62,6 +62,11 @@ def patch_render_depth(html: str) -> str:
     }
     return null;
   }
+  // Generic AI-created actors use the same obstacle map. Exposing only these
+  // validated helpers lets a visitor recover from a generated spawn point
+  // that landed inside a desk/chair without ever walking through furniture.
+  window.__townPointBlocked=(x,y)=>pointBlocked(x,y);
+  window.__townSafeGoal=(x,y)=>townSafeGoal(x,y);
   window.__townFindPath=(sx,sy,tx,ty)=>{
     const goal=townSafeGoal(tx,ty);
     return goal?makePath(sx,sy,goal.x,goal.y):[];
