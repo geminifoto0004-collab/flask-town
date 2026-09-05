@@ -13,7 +13,13 @@ def patch_render_panel_alignment(html: str) -> str:
 #town-game-chat-row{display:flex;align-items:flex-start;justify-content:center;gap:0;width:100%;min-width:0}
 #town-game-chat-row>.game-wrap{flex:1 1 auto;min-width:0}
 #town-game-chat-row>#town-side-panel{flex:0 0 360px;width:360px;max-width:360px;min-height:0;margin:0!important;align-self:flex-start;box-sizing:border-box}
-#town-side-panel #town-dialogue-list{min-height:0;overflow-y:auto!important;overflow-x:hidden!important;scrollbar-gutter:stable;overscroll-behavior:contain}
+# Keep a visible, wide native scrollbar. The dialogue-sync runtime is the only
+# code allowed to write scrollTop; this style must not turn the track into an
+# overlay that is difficult to grab.
+#town-side-panel #town-dialogue-list{min-height:0;overflow-y:scroll!important;overflow-x:hidden!important;scrollbar-gutter:stable;overscroll-behavior:contain;scrollbar-width:auto;scrollbar-color:#8faac3 #111922}
+#town-side-panel #town-dialogue-list::-webkit-scrollbar{width:16px}
+#town-side-panel #town-dialogue-list::-webkit-scrollbar-track{background:#111922}
+#town-side-panel #town-dialogue-list::-webkit-scrollbar-thumb{background:#8faac3;border:3px solid #111922;border-radius:8px;min-height:40px}
 @media(max-width:1180px){
   #town-game-chat-row{display:block}
   #town-game-chat-row>#town-side-panel{width:100%;max-width:none;height:320px!important;border-left:2px solid #1a2028;border-top:0}
@@ -48,8 +54,9 @@ def patch_render_panel_alignment(html: str) -> str:
       if(window.matchMedia('(max-width:1180px)').matches){panel.style.height='320px';return;}
       const h=Math.round(game.getBoundingClientRect().height);
       if(h>0)panel.style.height=h+'px';
-      const list=panel.querySelector('#town-dialogue-list');
-      if(list)requestAnimationFrame(()=>{list.scrollTop=list.scrollHeight;});
+      // Height alignment must never reset the reader's history position. The
+      // dialogue-sync runtime owns follow-latest behavior and preserves a
+      // manually dragged scrollbar through every render.
     };
     sync();
     requestAnimationFrame(sync);

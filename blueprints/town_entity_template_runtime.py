@@ -7,6 +7,7 @@ spawns instances.  Templates contain no story-specific names in source code.
 from __future__ import annotations
 
 import json
+import math
 import re
 import time
 
@@ -37,6 +38,8 @@ def _number(value, low, high, default=0.0):
     try:
         value = float(value)
     except Exception:
+        value = default
+    if not math.isfinite(value):
         value = default
     return round(max(low, min(high, value)), 2)
 
@@ -99,10 +102,23 @@ def _clean_parts(parts):
             "color": _color(raw.get("color")),
             "layer": int(_number(raw.get("layer"), -20, 20, 0)),
             "anchor": _text(raw.get("anchor") or "body", 24),
+            "motion": _clean_motion(raw.get("motion")),
         })
         if len(out) >= 48:
             break
     return out
+
+
+def _clean_motion(raw):
+    raw=raw if isinstance(raw,dict) else {}
+    on=_text(raw.get('on') or 'move',24)
+    return {
+        'on':on if on in {'move','idle','interact','always'} else 'move',
+        'dx':_number(raw.get('dx'),-20,20),
+        'dy':_number(raw.get('dy'),-20,20),
+        'period':_number(raw.get('period'),0.2,10,1),
+        'phase':_number(raw.get('phase'),-6.28,6.28),
+    }
 
 
 def _clean_visual(raw):
@@ -217,6 +233,13 @@ def _ensure_tools():
                                     "color": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
                                     "layer": {"type": "integer", "minimum": -20, "maximum": 20},
                                     "anchor": {"type": "string", "maxLength": 24},
+                                    "motion": {"type":"object", "description":"Optional local part animation, driven by actor state; phase is radians.", "properties": {
+                                        "on":{"type":"string","enum":["move","idle","interact","always"]},
+                                        "dx":{"type":"number","minimum":-20,"maximum":20},
+                                        "dy":{"type":"number","minimum":-20,"maximum":20},
+                                        "period":{"type":"number","minimum":0.2,"maximum":10},
+                                        "phase":{"type":"number","minimum":-6.28,"maximum":6.28}
+                                    }},
                                 },
                                 "required": ["shape", "x", "y", "w", "h", "color"],
                             },
@@ -397,7 +420,8 @@ def install_entity_template_runtime():
                 spawn["y"] = action.get("y")
             spawn_actions.extend(previous_validate([spawn]))
 
-        evolved = previous_apply(world, passthrough + spawn_actions)
+        # Instances must exist before move/say/give scripts target their IDs.
+        evolved = previous_apply(world, spawn_actions + passthrough)
         if spawn_actions:
             entities = [dict(e) for e in evolved.get("genericEntities", []) if isinstance(e, dict)]
             action_by_id = {a["id"]: a for a in template_actions if a.get("type") == "spawn_from_template"}

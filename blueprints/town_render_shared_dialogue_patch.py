@@ -9,7 +9,7 @@ changes; unchanged polling must not rebuild the sidebar or steal scroll input.
 def patch_render_shared_dialogue(html: str) -> str:
     css = r'''
 <style id="town-shared-dialogue-style">
-#town-side-panel>.panel-title,#town-side-panel>.panel-sub{display:none!important}
+#town-side-panel>.panel-title,#town-side-panel>.panel-sub{display:block!important}
 #town-side-panel{padding-top:10px!important}
 #town-side-panel>#town-dialogue-list{flex:1 1 auto!important;min-height:0!important}
 #town-inline-language-row{display:flex!important;align-items:center!important;gap:8px!important;margin:0!important;padding:0!important;border:0!important;flex:0 0 auto!important}
@@ -25,16 +25,12 @@ def patch_render_shared_dialogue(html: str) -> str:
   if(!app)return;
 
   function moveLanguageControls(){
+    // Keep both language selectors inside the right dialogue panel. Moving
+    // them into the game controls made the old toggle look like it vanished
+    // and allowed unrelated control/layout patches to hide it.
     const panel=document.getElementById('town-side-panel');
-    const controls=app.querySelector('.controls');
-    if(!panel||!controls)return;
-    panel.querySelectorAll('.panel-title,.panel-sub').forEach(el=>el.remove());
-    let row=panel.querySelector('.panel-row');
-    if(!row)return;
-    row.id='town-inline-language-row';
-    const auto=app.querySelector('#aiAutoBtn');
-    if(auto&&auto.parentNode===controls)auto.insertAdjacentElement('afterend',row);
-    else controls.appendChild(row);
+    const row=panel&&panel.querySelector('.panel-row');
+    if(row)row.id='town-inline-language-row';
   }
 
   let backing=Array.isArray(window.__townDialogueHistory)?window.__townDialogueHistory:[];

@@ -270,7 +270,7 @@ def install_town_admin_runtime():
             _cache_put(command_id, payload)
             return jsonify(payload)
         except requests.Timeout:
-            return jsonify({"ok": False, "error": "DeepSeek request timed out after 12 seconds"}), 504
+            return jsonify({"ok": False, "error": "DeepSeek request timed out after 30 seconds"}), 504
         except Exception as exc:
             return jsonify({"ok": False, "error": str(exc)[:300]}), 500
 

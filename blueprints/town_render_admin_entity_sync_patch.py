@@ -8,7 +8,6 @@ function runs after the dialogue panel/shared-history patches in the browser
 build.
 """
 
-from .town_render_dialogue_scroll_lock_patch import patch_render_dialogue_scroll_lock
 from .town_render_dialogue_sync_patch import patch_render_dialogue_sync
 
 
@@ -45,4 +44,4 @@ def patch_render_admin_entity_sync(html: str) -> str:
     # These must run after town_render_dialogue_panel_patch and
     # town_render_shared_dialogue_patch have injected their known markup/runtime.
     html = patch_render_dialogue_sync(html)
-    return patch_render_dialogue_scroll_lock(html)
+    return html

@@ -1,6 +1,6 @@
 """Bilingual dialogue/runtime support for CUSTOMS AGENT TOWN.
 
-Adds optional Traditional Chinese translations to dialogue tool payloads so the
+Adds Simplified Chinese translations to dialogue tool payloads so the
 browser can switch between Spanish and Chinese without losing the original
 Spanish conversation.
 """
@@ -32,6 +32,7 @@ def _ensure_bilingual_schema():
             turns["items"] = items
             props["turns"] = turns
             ((chat_tool.get("function") or {}).get("parameters") or {})["properties"] = props
+        items['required'] = list(dict.fromkeys(list(items.get('required') or [])+['text','text_zh']))
 
     say_tool = _tool_named("agent_say")
     if say_tool:
@@ -39,6 +40,8 @@ def _ensure_bilingual_schema():
         if "text_zh" not in props:
             props["text_zh"] = {"type": "string", "minLength": 1, "maxLength": 120}
             ((say_tool.get("function") or {}).get("parameters") or {})["properties"] = props
+        params=say_tool['function']['parameters']
+        params['required']=list(dict.fromkeys(list(params.get('required') or [])+['text','text_zh']))
 
 
 

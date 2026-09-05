@@ -34,6 +34,14 @@ def patch_render_dialogue_sync(html: str) -> str:
     window.__townActiveDialogue=liveDialogue;
     turns=turns.map(turn=>({...turn,text:dialogueText(turn)}));'''
     html = html.replace(old_store, new_store, 1)
+    # The profile patch uses a different history insertion. Previously this
+    # failed silently, so full chats AND translated single-speech copies appeared.
+    profile_store = """    window.__townDialogueHistory=Array.isArray(window.__townDialogueHistory)?window.__townDialogueHistory:[];
+    window.__townDialogueHistory.push({at:Date.now(),members:[from.name,to.name],turns:turns.map(turn=>({speaker:turn.speaker,text:turn.text,text_zh:turn.text_zh||''})),text:turns.map(turn=>turn.speaker+': '+turn.text).join(' ').slice(0,520)});
+    window.__townDialogueHistory=window.__townDialogueHistory.slice(-8);
+    if(typeof renderDialogueSidebar==='function')renderDialogueSidebar();"""
+    html = html.replace(profile_store, new_store.replace(
+        "    turns=turns.map(turn=>({...turn,text:dialogueText(turn)}));", ""), 1)
 
     marker = "  function installTownLanguageUi(){"
     helper = r'''  const townNativeSpeechState=new Map();
@@ -74,7 +82,7 @@ def patch_render_dialogue_sync(html: str) -> str:
     townPutIntoHistory(active);
   }
 
-  function townAppendStandaloneSpeech(speaker,visibleText){
+  function townAppendStandaloneSpeech(speaker,visibleText,original){
     const who=String(speaker||'').trim().toUpperCase();
     const text=String(visibleText||'').trim();
     if(!who||!text)return false;
@@ -87,20 +95,20 @@ def patch_render_dialogue_sync(html: str) -> str:
     // requires a two-person conversation, so keep this card browser-local.
     townPutIntoHistory({
       id:'speech-'+now+'-'+who,
-      at:now,members:[who],turns:[{speaker:who,text:text,text_zh:''}],text:who+': '+text,
+      at:now,members:[who],turns:[{speaker:who,text:original?.text||text,text_zh:original?.text_zh||''}],text:who+': '+text,
       __localOnly:true
     });
     return true;
   }
 
-  function townConsumeNativeSpeech(speaker,visibleText){
+  function townConsumeNativeSpeech(speaker,visibleText,original){
     const who=String(speaker||'').trim().toUpperCase();
     const shown=String(visibleText||'').trim();
     if(!who||!shown)return false;
 
     const active=window.__townActiveDialogue;
     if(!active||!active.__staged||!Array.isArray(active.__expectedTurns)){
-      return townAppendStandaloneSpeech(who,shown);
+      return townAppendStandaloneSpeech(who,shown,original);
     }
 
     let index=Math.max(0,Number(active.__spokenIndex)||0);
@@ -108,7 +116,7 @@ def patch_render_dialogue_sync(html: str) -> str:
     for(let i=index;i<active.__expectedTurns.length;i++){
       if(String(active.__expectedTurns[i]&&active.__expectedTurns[i].speaker||'').trim().toUpperCase()===who){selected=i;break;}
     }
-    if(selected<0)return townAppendStandaloneSpeech(who,shown);
+    if(selected<0)return townAppendStandaloneSpeech(who,shown,original);
 
     const turn=active.__expectedTurns[selected]||{};
     active.turns.push({
@@ -141,9 +149,10 @@ def patch_render_dialogue_sync(html: str) -> str:
           const id=String(agent.name||agent.slot||'').trim().toUpperCase();
           if(!id)return;
           liveIds.add(id);
-          const text=String(agent.chatText||'').trim();
+          const original=agent.__townSpeechTurn;
+          const text=String(agent.chatText?(original?.text||agent.chatText):'').trim();
           const previous=String(townNativeSpeechState.get(id)||'');
-          if(text&&text!==previous)townConsumeNativeSpeech(id,text);
+          if(text&&text!==previous)townConsumeNativeSpeech(id,text,original);
           townNativeSpeechState.set(id,text);
         });
         [...townNativeSpeechState.keys()].forEach(id=>{if(!liveIds.has(id))townNativeSpeechState.delete(id);});
@@ -157,11 +166,22 @@ def patch_render_dialogue_sync(html: str) -> str:
     if(!box)return null;
     let state=window.__townDialogueViewport;
     if(!state){
-      state={followLatest:true,top:0,mutating:false};
+      state={followLatest:true,top:0,mutating:false,dragging:false};
       window.__townDialogueViewport=state;
     }
     if(box.dataset.townViewportInstalled==='1')return state;
     box.dataset.townViewportInstalled='1';
+    box.tabIndex=0;
+    // Capture pointerdown at window level too: browser scrollbar thumbs do
+    // not always bubble their pointer event through the scroll container.
+    const markDragging=(event)=>{
+      if(event&&event.target&& (event.target===box||box.contains(event.target)))state.dragging=true;
+    };
+    box.addEventListener('pointerdown',markDragging,{passive:true});
+    window.addEventListener('pointerdown',markDragging,{capture:true,passive:true});
+    const release=()=>{state.dragging=false;};
+    window.addEventListener('pointerup',release,{passive:true});
+    window.addEventListener('pointercancel',release,{passive:true});
     box.addEventListener('scroll',()=>{
       if(state.mutating)return;
       state.top=Math.max(0,box.scrollTop);
@@ -190,6 +210,7 @@ def patch_render_dialogue_sync(html: str) -> str:
     html = html.replace(
         "    const items=(Array.isArray(window.__townDialogueHistory)?window.__townDialogueHistory:[]).slice(-8);",
         "    const viewport=townEnsureDialogueViewport(box);\n"
+        "    if(viewport?.dragging)return;\n"
         "    const oldTop=box.scrollTop;\n"
         "    const followLatest=!viewport||viewport.followLatest;\n"
         "    if(viewport)viewport.mutating=true;\n"
@@ -198,14 +219,16 @@ def patch_render_dialogue_sync(html: str) -> str:
     )
     html = html.replace(
         "    requestAnimationFrame(()=>{box.scrollTop=box.scrollHeight;syncTownDialoguePanelHeight();});",
-        "    requestAnimationFrame(()=>{\n"
+        "    {\n"
         "      if(followLatest)box.scrollTop=box.scrollHeight;\n"
         "      else box.scrollTop=Math.min(oldTop,Math.max(0,box.scrollHeight-box.clientHeight));\n"
-        "      if(viewport){viewport.top=box.scrollTop;setTimeout(()=>{viewport.mutating=false;},0);}\n"
+        "      if(viewport){viewport.top=box.scrollTop;viewport.mutating=false;}\n"
         "      syncTownDialoguePanelHeight();\n"
-        "    });",
+        "    }",
         1,
     )
+    html = html.replace("syncTownDialoguePanelHeight();return;}\n    box.innerHTML=items.map", "syncTownDialoguePanelHeight();if(viewport)viewport.mutating=false;return;}\n    const nextMarkup=items.map", 1)
+    html = html.replace("    }).join('');\n    {\n      if(followLatest)", "    }).join('');\n    if(box.innerHTML!==nextMarkup)box.innerHTML=nextMarkup;\n    {\n      if(followLatest)", 1)
 
     # Server-world refresh is historical data only. During local native playback
     # hide the complete persisted copy of that same conversation and retain the

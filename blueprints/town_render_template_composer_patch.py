@@ -23,7 +23,10 @@ def patch_render_template_composer(html: str) -> str:
     if(facing==='left')c.scale(-1,1);
     const ordered=parts.slice(0,48).sort((a,b)=>(Number(a.layer)||0)-(Number(b.layer)||0));
     ordered.forEach(p=>{
-      const x=(Number(p.x)||0)*scale,y=(Number(p.y)||0)*scale,w=Math.max(2,(Number(p.w)||2)*scale),h=Math.max(2,(Number(p.h)||2)*scale);
+      const motion=p.motion||{},on=motion.on||'move';
+      const active=on==='always'||(on==='move'&&moving)||(on==='idle'&&!e.current)||(on==='interact'&&e.interaction);
+      const wave=active?Math.sin(performance.now()/1000*Math.PI*2/Math.max(.2,Number(motion.period)||1)+(Number(motion.phase)||0)):0;
+      const x=((Number(p.x)||0)+wave*(Number(motion.dx)||0))*scale,y=((Number(p.y)||0)+wave*(Number(motion.dy)||0))*scale,w=Math.max(2,(Number(p.w)||2)*scale),h=Math.max(2,(Number(p.h)||2)*scale);
       c.fillStyle=String(p.color||'#808080');
       if(String(p.shape)==='ellipse'){
         c.beginPath();c.ellipse(Math.round(x),Math.round(y),Math.max(1,w/2),Math.max(1,h/2),0,0,Math.PI*2);c.fill();
@@ -54,9 +57,9 @@ def patch_render_template_composer(html: str) -> str:
         html = html.replace(move_marker, move_replacement, 1)
 
     start_marker = "    }else if(kind==='wait')e.current.duration=Math.max(.5,Math.min(120,Number(step.seconds)||1));\n    else if(kind==='give')e.current.duration=.9;"
-    start_replacement = "    }else if(kind==='wait')e.current.duration=Math.max(.5,Math.min(120,Number(step.seconds)||1));\n    else if(kind==='give')e.current.duration=.9;\n    else if(kind==='interact_entity'){\n      e.current.duration=Math.max(.2,Math.min(30,Number(step.duration)||1.2));e.interaction=String(step.verb||'interact');\n      if(step.text||step.text_zh){const zh=document.getElementById('dialogueLangSelect')?.value!=='es';e.speech=String(zh&&step.text_zh?step.text_zh:(step.text||''));}\n      eventLog('⚙ '+e.name+' '+e.interaction+(step.target?' → '+step.target:''));"
+    start_replacement = "    }else if(kind==='wait')e.current.duration=Math.max(.5,Math.min(120,Number(step.seconds)||1));\n    else if(kind==='give')e.current.duration=.9;\n    else if(kind==='interact_entity'){\n      e.current.duration=Math.max(.2,Math.min(30,Number(step.duration)||1.2));e.interaction=String(step.verb||'interact');\n      if(step.text||step.text_zh)e.speech=window.TownLanguage.text(step);\n      eventLog('⚙ '+e.name+' '+e.interaction+(step.target?' → '+step.target:''));"
     if start_marker in html:
-        html = html.replace(start_marker, start_replacement, 1)
+        html = html.replace(start_marker, start_replacement + "\n    }", 1)
 
     tick_marker = "    }else if(s.type==='say'||s.type==='wait'||s.type==='give'){\n      if(s.elapsed>=Number(s.duration||1))finishStep(e);"
     tick_replacement = "    }else if(s.type==='say'||s.type==='wait'||s.type==='give'||s.type==='interact_entity'){\n      if(s.elapsed>=Number(s.duration||1))finishStep(e);"

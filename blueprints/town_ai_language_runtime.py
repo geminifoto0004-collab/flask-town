@@ -100,9 +100,9 @@ GENERIC WORLD SCENERY:
 - Do NOT emit JavaScript or executable code.
 
 BILINGUAL OUTPUT FOR THE UI:
-- When you use agent_chat, for every turn provide BOTH fields text (natural Spanish) and text_zh (Traditional Chinese translation).
+- When you use agent_chat, for every turn provide BOTH fields text (natural Spanish) and text_zh (Simplified Chinese translation).
 - When you use agent_say, provide BOTH fields text and text_zh with the same meaning.
-- When a generic visitor uses say, text should be natural Spanish and text_zh should be its Traditional Chinese translation when the tool schema permits it.
+- When a generic visitor uses say, text should be natural Spanish and text_zh should be its Simplified Chinese translation when the tool schema permits it.
 - Keep the Chinese translation natural and clear; do not translate names.
 
 TOOL USE:

@@ -64,6 +64,8 @@ def _chat_tool():
         try:
             item_props = tool["function"]["parameters"]["properties"]["turns"]["items"]["properties"]
             item_props["text_zh"] = {"type": "string", "minLength": 1, "maxLength": 160}
+            items=tool['function']['parameters']['properties']['turns']['items']
+            items['required']=list(dict.fromkeys(list(items.get('required') or [])+['text','text_zh']))
         except Exception:
             pass
         return tool
@@ -164,6 +166,7 @@ The participants are exactly {a} and {b}; do not substitute another permanent ch
 Use the supplied TiDB character profiles, recent dialogue and world state so the conversation feels continuous.
 Produce 4 to 8 turns and alternate naturally between the two speakers.
 For EVERY turn, text must be natural everyday Chilean Spanish and text_zh must be a natural Traditional Chinese translation of the same line.
+Translate catchphrases, idioms and exclamations according to intent, emotional tone and context. Never copy Chinese into the Spanish text field. Do not translate them word for word.
 
 CURRENT TOPIC MODE: {topic_mode}
 {_TOPIC_GUIDANCE.get(topic_mode, '')}

@@ -117,19 +117,23 @@ def install_admin_fast_path_patch():
             "tools": tools,
             "tool_choice": "required",
             "temperature": 0.66,
-            "max_tokens": 1500,
+            # A composed visual plus spawn/actions cannot fit in 1500 tokens.
+            "max_tokens": 4500,
         }
 
         response = requests.post(
             "https://api.deepseek.com/chat/completions",
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
             json=payload,
-            timeout=(4, 12),
+            timeout=(4, 30),
         )
         if not response.ok:
             raise RuntimeError(f"DeepSeek HTTP {response.status_code}: {response.text[:220]}")
 
-        message = (((response.json().get("choices") or [{}])[0]).get("message") or {})
+        choice = (response.json().get("choices") or [{}])[0]
+        if choice.get('finish_reason') == 'length':
+            raise RuntimeError('AI blueprint was truncated; no partial scene was applied')
+        message = choice.get("message") or {}
         raw_actions = _tool_calls_to_actions(message)
         metadata = _admin._scene_metadata(raw_actions)
         actions = _base._validate_actions(raw_actions)

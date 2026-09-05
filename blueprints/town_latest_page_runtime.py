@@ -21,6 +21,13 @@ def latest_town_html():
         for index in range(1, _CHUNK_COUNT + 1)
     )
     html = gzip.decompress(base64.b64decode(payload)).decode("utf-8")
+    language_script = '<script src="/static/town_language.js?v=20260905"></script>'
+    if '</head>' in html:
+        html = html.replace('</head>', language_script + '</head>', 1)
+    else:
+        # App Blocks are served as fragments (the current snapshot has no
+        # document head), so load the language owner before any inline runtime.
+        html = language_script + html
     # v119: execute the returned ephemeral actions (movement/chat/dogs/etc.) even
     # when the server-authoritative world endpoint is available, then reconcile
     # persistent state from /api/town/world.

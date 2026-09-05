@@ -14,7 +14,11 @@ def patch_render_dialogue_panel(html: str) -> str:
   #town-side-panel .panel-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
   #town-side-panel label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:#d6e4ff;flex:1 1 130px}
   #town-side-panel select{background:#243646;color:#fff;border:1px solid #4e6a84;border-radius:6px;padding:6px 8px;font-size:12px}
-  #town-dialogue-list{overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:10px;padding-right:2px;min-height:0;flex:1 1 auto;scrollbar-gutter:stable;overscroll-behavior:contain}
+  #town-dialogue-list{overflow-y:scroll;overflow-x:hidden;display:flex;flex-direction:column;gap:10px;padding-right:6px;min-height:0;flex:1 1 auto;scrollbar-gutter:stable;overscroll-behavior:contain;overflow-anchor:none;touch-action:pan-y;scrollbar-width:auto;scrollbar-color:#8faac3 #111922}
+  #town-dialogue-list::-webkit-scrollbar{width:16px}
+  #town-dialogue-list::-webkit-scrollbar-track{background:#111922}
+  #town-dialogue-list::-webkit-scrollbar-thumb{background:#8faac3;border:3px solid #111922;border-radius:8px;min-height:40px}
+  #town-dialogue-list>.town-dialogue-card{flex-shrink:0}
   .town-dialogue-card{background:#111922;border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:10px}
   .town-dialogue-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;font-size:11px;color:#b8cae6}
   .town-dialogue-members{font-weight:700;color:#fff;letter-spacing:.3px}
@@ -46,7 +50,7 @@ def patch_render_dialogue_panel(html: str) -> str:
         dialogueLang:prefs&&prefs.dialogueLang==='zh'?'zh':'es',
         statusLang:prefs&&prefs.statusLang==='es'?'es':'zh'
       };
-    }catch(_){return {dialogueLang:'es',statusLang:'zh'};}
+    }catch(_){return {dialogueLang:'zh',statusLang:'zh'};}
   }
   function saveTownUiPrefs(){
     try{localStorage.setItem(TOWN_UI_PREF_KEY,JSON.stringify(window.__townUiPrefs||{dialogueLang:'es',statusLang:'zh'}));}catch(_){ }
@@ -56,28 +60,28 @@ def patch_render_dialogue_panel(html: str) -> str:
   window.__townStatusHistory=Array.isArray(window.__townStatusHistory)?window.__townStatusHistory:[];
   function escapeHtml(v){return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
   function dialogueText(turn){
+    if(window.TownLanguage)return window.TownLanguage.text(turn);
     if((window.__townUiPrefs||{}).dialogueLang==='zh'&&turn&&turn.text_zh)return String(turn.text_zh);
     return String((turn&&turn.text)||'');
   }
   function translateTownLog(message, lang){
     const raw=String(message==null?'':message);
     if(lang!=='es')return raw;
-    let out=raw;
-    const replacements=[
-      ['AI 生活檔案：','Perfil AI: '],['AI 更新 ','AI actualizó '],[' 的生活檔案',' del perfil de vida'],
-      ['AI 指派：','AI asignó: '],['AI 動作完成：','Acción AI completada: '],['AI 新增家具：','AI añadió mueble: '],
-      ['AI 新增物件：','AI añadió objeto: '],['AI 本輪決定保持現狀','La AI decidió mantener el estado actual'],
-      ['開始聊天','empezaron a conversar'],['聊完了','terminaron de conversar'],['開始 ','inició '],
-      ['去沖咖啡','fue por café'],['去整理文件','fue a ordenar archivos'],['回工位工作','volvió a su puesto'],
-      ['去看植物','fue a ver las plantas'],['去澆花','fue a regar una planta'],['去窗邊看海','fue a mirar el mar'],
-      ['伸展一下','se estiró un poco'],['去用海事電台','fue a usar la radio marítima'],['去找同事','fue a buscar a una compañera'],
-      ['去釣魚','fue a pescar'],['走一走','salió a caminar'],['重新布置辦公室','reorganizó la oficina'],
-      ['一隻狗來到辦公室附近','llegó un perro cerca de la oficina'],['辦公室增加一盆植物','apareció una planta nueva en la oficina'],
-      ['新增家具','añadió mueble'],['移動家具','movió mueble'],['移除家具','retiró mueble'],['新增物件','añadió objeto'],
-      ['設定生活檔案','definió el perfil de vida'],['歲',' años'],['個小孩',' hijos'],['無小孩','sin hijos'],['喜歡 ','le gusta ']
-    ];
-    replacements.forEach(pair=>{out=out.split(pair[0]).join(pair[1]);});
-    return out;
+    if(!window.TownLanguage)return raw;
+    const translated=window.TownLanguage.text({text:raw},'es');
+    // Keep a readable source until the asynchronous semantic translation is
+    // ready; the language-change event will update the existing log node.
+    return translated.startsWith('[Traducción pendiente]')?raw:translated;
+  }
+  function refreshTownLogLanguage(){
+    const lang=(window.__townUiPrefs||{}).statusLang==='es'?'es':'zh';
+    document.querySelectorAll('#eventLog [data-town-status-zh]').forEach(node=>{
+      const zh=String(node.dataset.townStatusZh||'');
+      if(lang!=='es'){node.textContent='> '+zh;return;}
+      const es=translateTownLog(zh,'es');
+      node.dataset.townStatusEs=es;
+      node.textContent='> '+es;
+    });
   }
   function findTownRootNode(){
     const labels=['AI 立即想一下','船抵港','快速完成','CUSTOMS AGENT TOWN'];
@@ -128,8 +132,13 @@ def patch_render_dialogue_panel(html: str) -> str:
     const statusSel=panel.querySelector('#town-status-lang');
     dialogueSel.value=(window.__townUiPrefs||{}).dialogueLang||'es';
     statusSel.value=(window.__townUiPrefs||{}).statusLang||'zh';
-    dialogueSel.addEventListener('change',()=>{window.__townUiPrefs.dialogueLang=dialogueSel.value;saveTownUiPrefs();renderDialogueSidebar();});
-    statusSel.addEventListener('change',()=>{window.__townUiPrefs.statusLang=statusSel.value;saveTownUiPrefs();if(typeof addLog==='function')addLog(statusSel.value==='es'?'Idioma del registro cambiado a Español':'狀態列語言已切換為中文');});
+    dialogueSel.addEventListener('change',()=>{window.__townUiPrefs.dialogueLang=dialogueSel.value;saveTownUiPrefs();window.dispatchEvent(new Event('town-language-change'));});
+    window.addEventListener('town-language-change',()=>{
+      agents.forEach(a=>{if(a.chatText&&a.__townSpeechTurn)a.chatText=dialogueText(a.__townSpeechTurn);});
+      refreshTownLogLanguage();
+      renderDialogueSidebar();
+    });
+    statusSel.addEventListener('change',()=>{window.__townUiPrefs.statusLang=statusSel.value;saveTownUiPrefs();if(typeof addLog==='function')addLog(statusSel.value==='es'?'Idioma del registro cambiado a Español':'狀態列語言已切換為中文');refreshTownLogLanguage();});
     setTimeout(syncTownDialoguePanelHeight,0);
     if('ResizeObserver' in window){
       const game=document.querySelector('#customs-sim .game-wrap');
@@ -162,11 +171,16 @@ def patch_render_dialogue_panel(html: str) -> str:
     if(typeof addLog==='function'&&!window.__townAddLogWrapped){
       window.__townRawAddLog=addLog;
       addLog=function(message){
-        const item={at:Date.now(),zh:String(message==null?'':message),es:translateTownLog(message,'es')};
+        const zh=String(message==null?'':message);
+        const statusLang=(window.__townUiPrefs||{}).statusLang==='es'?'es':'zh';
+        const item={at:Date.now(),zh,es:statusLang==='es'?translateTownLog(zh,'es'):zh};
         window.__townStatusHistory=Array.isArray(window.__townStatusHistory)?window.__townStatusHistory:[];
         window.__townStatusHistory.push(item);
         window.__townStatusHistory=window.__townStatusHistory.slice(-120);
-        return window.__townRawAddLog((window.__townUiPrefs||{}).statusLang==='es'?item.es:item.zh);
+        const result=window.__townRawAddLog((window.__townUiPrefs||{}).statusLang==='es'?item.es:item.zh);
+        const node=document.querySelector('#eventLog')?.firstElementChild;
+        if(node){node.dataset.townStatusZh=item.zh;node.dataset.townStatusEs=item.es;}
+        return result;
       };
       window.__townAddLogWrapped=true;
     }

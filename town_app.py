@@ -58,6 +58,7 @@ from blueprints.town_admin_reliability_patch import install_admin_reliability_pa
 from blueprints.town_entity_template_director_patch import install_entity_template_director_patch
 from blueprints.town_character_admin_runtime import install_character_admin_runtime
 from blueprints.town_state_merge_runtime import install_state_merge_guard
+from blueprints.town_dialogue_translation import install_dialogue_translation
 
 from blueprints import town_page_bp as _town_page_module
 from blueprints.town_latest_page_runtime import latest_town_html
@@ -176,6 +177,7 @@ _town_page_module._patched_town_html = lambda: _TOWN_HTML_CACHE
 
 app.register_blueprint(town_ai_bp)
 app.register_blueprint(town_page_bp)
+install_dialogue_translation(app)
 _STATE_MERGE_GUARD = install_state_merge_guard(app)
 
 
@@ -208,9 +210,11 @@ def town_health():
             "dialogue_native_sync": True,
             "dialogue_single_scroll_owner": True,
             "admin_reliability_guard": True,
-            "admin_core_fallback": True,
+            "admin_core_fallback": False,
             "admin_fast_path": True,
-            "admin_deepseek_read_timeout_seconds": 12,
+            "admin_deepseek_read_timeout_seconds": 30,
+            "bilingual_speech_source_preserved": True,
+            "unified_scene_depth": True,
             "semantic_entity_compat": True,
             "world_scene_runtime": True,
             "roster_integrity_runtime": True,

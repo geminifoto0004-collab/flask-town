@@ -1,8 +1,8 @@
-"""Safe browser overlay for the generic entity/action engine.
+"""Safe browser bridge for the generic entity/action engine.
 
-This patch does not replace the known-good game loop. It renders AI-created
-visitors/actors on a transparent canvas and animates validated shared scripts
-from /api/town/world.
+This patch does not replace the known-good game loop. It contributes AI-created
+visitors/actors to the base canvas depth list and animates validated shared
+scripts from /api/town/world.
 """
 
 
@@ -15,17 +15,22 @@ def patch_render_generic_entities(html: str) -> str:
     js = r'''
 <script id="town-generic-entity-runtime">
 (()=>{
+  // The page can be mounted into the browser before the game canvas exists.
+  // Retry boot instead of returning permanently, otherwise the admin panel
+  // reports "renderer 未連接" and newly spawned entities never appear.
+  function boot(){
   const app=document.getElementById('customs-sim');
   const wrap=app&&app.querySelector('.game-wrap');
   const base=app&&app.querySelector('.game-wrap canvas');
-  if(!app||!wrap||!base)return;
+  if(!app||!wrap||!base){setTimeout(boot,120);return;}
 
   let overlay=document.getElementById('town-generic-entity-overlay');
   if(!overlay){
     overlay=document.createElement('canvas');overlay.id='town-generic-entity-overlay';
     overlay.width=640;overlay.height=400;wrap.appendChild(overlay);
   }
-  const c=overlay.getContext('2d');if(!c)return;c.imageSmoothingEnabled=false;
+  overlay.hidden=true;
+  const c=base.getContext('2d');if(!c)return;c.imageSmoothingEnabled=false;
   const entities=new Map(), hidden=new Set(), officerPos=new Map();
   const officerFallback={MIA:{x:320,y:236},ANA:{x:500,y:236},LIA:{x:145,y:236}};
   let last=performance.now(),refreshing=false;
@@ -49,6 +54,7 @@ def patch_render_generic_entities(html: str) -> str:
     return null;
   }
   function routeFor(e,tx,ty){
+    if(e.mobility!=='swim'&&e.mobility!=='float'&&window.__townFindPath)return window.__townFindPath(e.x,e.y,tx,ty);
     const route=[];const insideNow=e.y<274,insideTarget=ty<274;
     if(insideNow!==insideTarget){
       if(insideNow){route.push({x:320,y:265},{x:320,y:282});}
@@ -69,8 +75,7 @@ def patch_render_generic_entities(html: str) -> str:
       const ty=t?t.y:(Number.isFinite(Number(step.y))?Number(step.y):(z?z.y:e.y));
       e.current.route=routeFor(e,tx,ty);e.current.speed=Number(step.speed)||38;
     }else if(kind==='say'){
-      const zh=document.getElementById('dialogueLangSelect')?.value!=='es';
-      e.speech=String(zh&&(step.text_zh||step.textZh)?(step.text_zh||step.textZh):(step.text||''));
+      e.speech=window.TownLanguage.text(step);
       e.current.duration=Math.max(4,Math.min(12,2.8+e.speech.length*.08));
       if(e.speech)eventLog('💬 '+e.name+'：'+e.speech);
     }else if(kind==='wait')e.current.duration=Math.max(.5,Math.min(120,Number(step.seconds)||1));
@@ -105,9 +110,10 @@ def patch_render_generic_entities(html: str) -> str:
   function label(text,x,y){
     const t=String(text||'').toUpperCase();if(!t)return;c.font='bold 7px monospace';const w=Math.max(30,Math.ceil(c.measureText(t).width)+8);px(x-w/2,y-35,w,10,'rgba(22,31,40,.88)');c.fillStyle='#fff';c.textAlign='center';c.fillText(t,Math.round(x),Math.round(y-27));
   }
-  function bubble(e){
+  function paintBubble(e){
     if(!e.speech)return;c.font='8px sans-serif';const text=e.speech.slice(0,42),w=Math.min(210,Math.max(62,c.measureText(text).width+18));let x=Math.max(6,Math.min(640-w-6,e.x-w/2)),y=Math.max(6,e.y-70);px(x,y,w,23,'rgba(250,252,255,.96)');px(e.x-2,y+23,6,5,'rgba(250,252,255,.96)');c.fillStyle='#1d2730';c.textAlign='left';c.fillText(text,x+8,y+15);
   }
+  function bubble(e){if(e.speech)(window.__townSpeechDraws||[]).push(()=>paintBubble(e));}
   function drawHuman(e){
     const x=e.x,y=e.y,body=e.bodyColor||'#62788a',accent=e.accentColor||'#d9a441';
     px(x-7,y+12,16,3,'rgba(0,0,0,.20)');px(x-7,y+4,6,10,'#334454');px(x+2,y+4,6,10,'#334454');
@@ -153,8 +159,19 @@ def patch_render_generic_entities(html: str) -> str:
     if(refreshing)return;refreshing=true;
     try{const r=await fetch('/api/town/world',{headers:{Accept:'application/json'}});if(!r.ok)return;const data=await r.json();mergeWorld(data&&data.world||{});}catch(_e){}finally{refreshing=false;}
   }
-  function frame(now){const dt=Math.min(.05,(now-last)/1000);last=now;c.clearRect(0,0,640,400);entities.forEach(e=>{tick(e,dt);draw(e);});requestAnimationFrame(frame);}
-  refresh();setInterval(refresh,900);requestAnimationFrame(frame);
+  window.__townSceneLayers=window.__townSceneLayers||[];
+  window.__townSceneLayers.push((dt)=>{
+    const items=[];
+    entities.forEach(e=>{
+      tick(e,dt);
+      if(e.current&&(e.current.type==='say'||e.current.type==='interact_entity')&&(e.current.text||e.current.text_zh))e.speech=window.TownLanguage.text(e.current);
+      if(!hidden.has(e.id))items.push({y:e.y+14,draw:()=>draw(e)});
+    });
+    return items;
+  });
+  refresh();setInterval(refresh,2500);
+  }
+  boot();
 })();
 </script>
 '''

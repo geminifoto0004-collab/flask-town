@@ -60,13 +60,13 @@ def _ensure_tools():
     if "say" not in names:
         DIRECTOR_TOOLS.append(_fn(
             "say",
-            "Make a spawned generic human/visitor say an exact sentence. Use text for natural Spanish and text_zh for Traditional Chinese translation when useful.",
+            "Make a spawned generic human/visitor say an exact sentence. Always provide BOTH text (natural Spanish) and text_zh (Simplified Chinese with the same meaning); neither field may be omitted.",
             {
                 "entity": {"type": "string", "minLength": 1, "maxLength": 64},
                 "text": {"type": "string", "minLength": 1, "maxLength": 160},
                 "text_zh": {"type": "string", "maxLength": 160},
             },
-            ["entity", "text"],
+            ["entity", "text", "text_zh"],
         ))
     if "give" not in names:
         DIRECTOR_TOOLS.append(_fn(
@@ -225,8 +225,9 @@ def install_generic_entity_runtime():
             elif kind == "say":
                 entity = _text(item.get("entity") or item.get("id"), 64)
                 text = _text(item.get("text"), 160)
-                if entity and text:
-                    output.append({"type": kind, "entity": entity, "text": text, "text_zh": _text(item.get("text_zh"), 160)})
+                text_zh = _text(item.get("text_zh"), 160)
+                if entity and text and text_zh:
+                    output.append({"type": kind, "entity": entity, "text": text, "text_zh": text_zh})
             elif kind == "give":
                 entity = _text(item.get("entity") or item.get("id"), 64)
                 target = _text(item.get("target"), 64)

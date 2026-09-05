@@ -1,8 +1,8 @@
 """Safe post-patch for generic AI pixel objects, visitors and presence hints.
 
 This stays outside the known-good game animation loop. Shared world objects and
-temporary visitors are drawn on one transparent overlay, while the original
-game canvas remains untouched.
+temporary visitors contribute depth-sorted items to the original game canvas,
+so one canvas owns the scene layering.
 """
 
 
@@ -32,7 +32,8 @@ def patch_render_world_objects(html: str) -> str:
   if(!overlay){
     overlay=document.createElement('canvas');overlay.id='town-generic-object-overlay';overlay.width=640;overlay.height=400;wrap.appendChild(overlay);
   }
-  const oc=overlay.getContext('2d');if(!oc)return;oc.imageSmoothingEnabled=false;
+  overlay.hidden=true;
+  const oc=game.getContext('2d');if(!oc)return;oc.imageSmoothingEnabled=false;
 
   let objects=[],visitors=[];
   let last=performance.now();
@@ -78,13 +79,13 @@ def patch_render_world_objects(html: str) -> str:
     const label=String(v.name||'VISITOR').slice(0,8).toUpperCase();px(x-16,y-38,32,y?10:10,'rgba(23,32,42,.88)');txt(label,x,y-30,'#fff',6);
     if(v.gift){px(x+8,y-3,10,9,'#b9854f');px(x+10,y-6,6,4,'#d4b37a');txt(String(v.gift).slice(0,4),x+13,y+14,'#fff',5);}
   }
-  function frame(nowPerf){
-    const dt=Math.min(.05,(nowPerf-last)/1000);last=nowPerf;oc.clearRect(0,0,640,400);
-    objects.forEach(o=>{stepObject(o,dt);drawObject(o);});
-    const now=Date.now();visitors.forEach(v=>drawVisitor(v,now));
-    requestAnimationFrame(frame);
-  }
-  requestAnimationFrame(frame);
+  window.__townSceneLayers=window.__townSceneLayers||[];
+  window.__townSceneLayers.push(dt=>{
+    const items=[],now=Date.now();
+    objects.forEach(o=>{stepObject(o,dt);items.push({y:Number(o.y)||0,draw:()=>drawObject(o)});});
+    visitors.forEach(v=>items.push({y:visitorPosition(v,now).y+14,draw:()=>drawVisitor(v,now)}));
+    return items;
+  });
 
   let refreshing=false;
   async function refresh(){
