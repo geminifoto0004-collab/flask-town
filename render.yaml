@@ -1,0 +1,16 @@
+# FLOWER V10 test service for geminifoto0007@gmail.com only.
+# Deploy this blueprint on branch flower-v10-test-0007, not main.
+services:
+  - type: web
+    name: flower-v10-test-0007
+    runtime: python
+    plan: free
+    region: oregon
+    buildCommand: pip install 'flask>=3.0,<4' 'gunicorn>=22,<24'
+    startCommand: python flower_v10_bootstrap.py
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: FLOWER_ACCESS_PASSWORD
+        sync: false
